@@ -8,7 +8,7 @@ import io
 from typing import Optional, Dict, Any
 import pandas as pd
 from pydantic import BaseModel, Field
-from fastapi import FastAPI, Query, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Query, HTTPException, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -58,6 +58,15 @@ def get_or_load_data(market: str = "US"):
             CACHE[m] = data
             return data
     return None
+
+@app.get("/debug")
+def debug_endpoint(request: Request):
+    return JSONResponse({
+        "url": str(request.url),
+        "path": request.scope.get("path"),
+        "raw_path": str(request.scope.get("raw_path")),
+        "headers": dict(request.headers)
+    })
 
 @app.get("/", response_class=HTMLResponse)
 @app.get("/api", response_class=HTMLResponse)
