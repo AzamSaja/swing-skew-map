@@ -1,10 +1,7 @@
-﻿{
+{
   "functions": {
     "api/index.py": {
-      "includeFiles": [
-        "web/**",
-        "data/**"
-      ]
+      "includeFiles": "web/**,data/**"
     }
   },
   "rewrites": [
