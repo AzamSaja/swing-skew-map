@@ -5,21 +5,33 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from web.app import app
+from web.app import app as fastapi_app
 
-@app.middleware("http")
-async def vercel_path_rewrite(request, call_next):
-    # If request was rewritten by Vercel, restore original client path
-    for h in ["x-matched-path", "x-vercel-matched-path", "x-forwarded-uri", "x-original-uri"]:
-        val = request.headers.get(h)
-        if val:
-            path_val = val.split("?")[0]
-            if path_val and path_val != request.scope["path"]:
-                request.scope["path"] = path_val
-                request.scope["raw_path"] = path_val.encode("latin1")
-                break
-    else:
-        if request.scope.get("path") in ["/api/index.py", "/api/index", "/api"]:
-            request.scope["path"] = "/"
-            request.scope["raw_path"] = b"/"
-    return await call_next(request)
+class VercelPathRewriter:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            for h in [b"x-matched-path", b"x-vercel-matched-path", b"x-forwarded-uri", b"x-original-uri"]:
+                if h in headers:
+                    val = headers[h].decode("latin1")
+                    if val:
+                        if "?" in val:
+                            path_part, qs_part = val.split("?", 1)
+                            scope["path"] = path_part
+                            scope["raw_path"] = path_part.encode("latin1")
+                            if not scope.get("query_string"):
+                                scope["query_string"] = qs_part.encode("latin1")
+                        else:
+                            scope["path"] = val
+                            scope["raw_path"] = val.encode("latin1")
+                        break
+            else:
+                if scope.get("path") in ["/api/index.py", "/api/index", "/api"]:
+                    scope["path"] = "/"
+                    scope["raw_path"] = b"/"
+        await self.app(scope, receive, send)
+
+app = VercelPathRewriter(fastapi_app)

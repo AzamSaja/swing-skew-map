@@ -59,19 +59,7 @@ def get_or_load_data(market: str = "US"):
             return data
     return None
 
-@app.get("/debug")
-def debug_endpoint(request: Request):
-    return JSONResponse({
-        "url": str(request.url),
-        "path": request.scope.get("path"),
-        "raw_path": str(request.scope.get("raw_path")),
-        "headers": dict(request.headers)
-    })
-
 @app.get("/", response_class=HTMLResponse)
-@app.get("/api", response_class=HTMLResponse)
-@app.get("/api/index", response_class=HTMLResponse)
-@app.get("/api/index.py", response_class=HTMLResponse)
 def index_page():
     index_file = TEMPLATES_DIR / "index.html"
     if not index_file.exists():
