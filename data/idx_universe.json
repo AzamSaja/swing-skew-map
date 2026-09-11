@@ -1,0 +1,63 @@
+{
+  "market": "IDX",
+  "market_name": "Indonesia Stock Exchange (Bursa Efek Indonesia - BEI)",
+  "benchmark": "^JKSE",
+  "benchmarks": ["^JKSE"],
+  "sectors": {
+    "Financials": [
+      "BBCA.JK",
+      "BBRI.JK",
+      "BMRI.JK",
+      "BBNI.JK"
+    ],
+    "Consumer Staples & Retail": [
+      "UNVR.JK",
+      "ICBP.JK",
+      "INDF.JK",
+      "AMRT.JK",
+      "MYOR.JK",
+      "CPIN.JK"
+    ],
+    "Basic Materials & Mining": [
+      "MDKA.JK",
+      "ANTM.JK",
+      "INCO.JK",
+      "BRPT.JK",
+      "TPIA.JK",
+      "AMMN.JK"
+    ],
+    "Energy & Oil/Gas": [
+      "ADRO.JK",
+      "PGAS.JK",
+      "PTBA.JK",
+      "MEDC.JK",
+      "AKRA.JK"
+    ],
+    "Telecommunications & Tech": [
+      "TLKM.JK",
+      "ISAT.JK",
+      "GOTO.JK",
+      "EMTK.JK"
+    ],
+    "Conglomerates & Industrials": [
+      "ASII.JK",
+      "BREN.JK",
+      "JSMR.JK"
+    ],
+    "Healthcare": [
+      "KLBF.JK",
+      "MIKA.JK"
+    ]
+  },
+  "watchlist": [
+    "BBCA.JK",
+    "BBRI.JK",
+    "BMRI.JK",
+    "TLKM.JK",
+    "ASII.JK",
+    "GOTO.JK",
+    "ADRO.JK",
+    "AMMN.JK"
+  ]
+}
+

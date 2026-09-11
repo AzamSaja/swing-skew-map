@@ -1,0 +1,18 @@
+{
+  "benchmarks": ["SPY", "QQQ", "IWM"],
+  "sectors": {
+    "Technology": ["AAPL", "MSFT", "NVDA", "AMD", "AVGO", "QCOM", "CRM", "ADBE", "INTC", "MU"],
+    "Communication Services": ["GOOGL", "META", "NFLX", "DIS"],
+    "Consumer Discretionary": ["AMZN", "TSLA", "NKE", "SBUX", "HD"],
+    "Financials": ["JPM", "BAC", "GS", "MS", "V", "MA"],
+    "Healthcare": ["UNH", "LLY", "JNJ", "PFE", "ABBV"],
+    "Energy": ["XOM", "CVX", "SLB", "OXY"],
+    "Industrials": ["CAT", "BA", "GE", "UNP"],
+    "Consumer Staples": ["PG", "KO", "PEP", "COST", "WMT"],
+    "Utilities": ["NEE", "DUK", "SO"],
+    "Real Estate": ["PLD", "AMT"],
+    "Materials": ["LIN", "FCX"]
+  },
+  "watchlist": ["NVDA", "TSLA", "AAPL", "AMD", "MSFT", "AMZN", "META", "GOOGL", "UNH", "LLY"]
+}
+

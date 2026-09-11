@@ -1,0 +1,44 @@
+Table: 66e1f358-b216-4347-ab72-25273ba31879 parent: 3c0a77cc-65b6-8167-8b2c-d9b3499eaa61
+Quadrant | What it looks like | What it's telling you | My default action
+🔵 CONTRARIAN BID | Stock is DOWN on the month, but calls are bid | Price is falling while somebody is quietly paying up for upside. The tape and the options chain disagree. | Watchlist. This is the most interesting box on the map and the reason I built it.
+🟠 CHASE | Stock is UP, and calls are bid | Everyone agrees. Price is up and people are still paying for more up. | Crowded. Not wrong — just a worse entry than it was. Late, not bad.
+🟡 HEDGED RALLY | Stock is UP, but puts are bid | Price is rising and people are paying to protect against it reversing. The rally isn't trusted. | Tighten stops on anything you already hold here.
+🔴 FEAR | Stock is DOWN, and puts are bid | Everyone agrees, in the other direction. Falling, and protection is getting more expensive. | Leave it alone. Not a bargain. Not yet.
+--------------------------------------------------
+Table: 2e2c04fb-5846-483d-9142-054b16271c8e parent: 3c0a77cc-65b6-8167-8b2c-d9b3499eaa61
+Decision | Why it matters | What breaks if you get it wrong
+1. Which two strikes define your skew? | They have to be equidistant in probability, not in dollars or percent. Pick a delta level and hold it forever. | Use fixed percentage moneyness and a quiet stock and a violent one are no longer comparable — you'll rank volatility, not sentiment.
+2. Which expiry — and is it fixed? | You need one rule that picks the same kind of expiry every single run, for every name. | Let it drift and you're measuring the calendar. And outside the very largest names, weekly chains are too thin to trust — so mixing megacap weeklies with monthlies everywhere else means you're quietly comparing two different things.
+3. Do you normalize, or not? | Raw difference and "divided by the stock's own volatility" are both valid. They answer different questions. | Pick the wrong one for the comparison you're making and you get trap #2 — the same three sectors top your fear list every day for arithmetic reasons.
+4. What's your universe — and is your sector benchmark the same list? | It must not be. Your sector averages need their own broad, neutral universe. | Benchmark against your own watchlist and every sector inherits your bias. Mine is roughly 60% semis and software; folding it in would make the whole market read like tech.
+5. What's your quality bar — and do you drop or down-weight? | Some chains are too sparse to believe. You have to decide what happens to them. | Dropping is easy and throws away real information. Down-weighting is better and forces you to build a score. Doing neither means noise ranks alongside signal.
+6. What's your sanity ceiling? | Above some value you should stop believing your own number and assume a bad quote. | Set it by looking at your data and you'll draw the line under whatever's ugliest today. Set it by asking what's plausible for that kind of stock. See trap #4.
+7. What do you store, and starting when? | Every change-based reading needs history you don't have on day one. | Skip this and in six weeks you'll still be reading levels instead of changes — which is the reading that actually matters.
+--------------------------------------------------
+Table: 925a1de9-b4ff-4d6a-a1df-20fdf5fdcc66 parent: 3c0a77cc-65b6-8167-8b2c-d9b3499eaa61
+Column | What goes in it | Source
+Ticker | Your 15–25 names | You
+Sector | Group label | You
+ATM IV | IV at the money, on your chosen expiry | Broker chain
+Put IV | IV at your chosen put delta, same expiry | Broker chain
+Call IV | IV at the mirror-image call delta, same expiry | Broker chain
+Skew | Put IV against call IV, normalized however you settled decision #3 | Your formula
+Vol points | The un-normalized version. Keep both columns — this is the one that survives a cross-sector comparison | Your formula
+1M return | Stock's 1-month % change | Any screener
+1M vs SPY | =Stock1M − SPY1M | Formula
+RVOL | =TodayVol / AvgVol | Any screener
+Earnings date | Next confirmed date — trap #5 | Any calendar
+Chain OK? | Yes/No — thin chain = ignore the number | Your eyes
+Sector rank | Where this name's skew sits inside its own sector group — the sentence in Part 5 needs it | Your formula
+Δ vs last week | =ThisWeekSkew − LastWeekSkew | Last week's file
+--------------------------------------------------
+Table: c9523f8e-159f-470a-9987-a1b5ff750eda parent: 3c0a77cc-65b6-8167-8b2c-d9b3499eaa61
+ | Spreadsheet | Build it yourself | The Desk
+Names covered | 15–25, hand-entered | as many as you pay for | several hundred, every day
+How often | once a week, by hand | daily, once it works | every trading day, already read
+Change-based reads | blank for ~6 weeks | blank until you've banked the history | already banked
+Sector benchmark | too small to trust | yours to build and maintain | built in
+Time to first useful read | an afternoon | weeks, plus 8 silent failure modes | under 30 seconds
+Cost | free | two data plans, ~$30/mo each, before your time | $69/mo
+Still doesn't give you | the level, the entry, the invalidation | the level, the entry, the invalidation | — those are the point
+--------------------------------------------------

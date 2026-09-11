@@ -1,0 +1,2178 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Options Skew Map &mdash; Multi-Market Swing Desk & Architecture</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              bg: '#080d1a',
+              card: '#0f172a',
+              cardHover: '#1e293b',
+              border: '#1e293b',
+              borderLight: '#334155',
+              text: '#f8fafc',
+              muted: '#94a3b8',
+              blue: '#3b82f6',
+              orange: '#f97316',
+              yellow: '#eab308',
+              red: '#ef4444',
+              emerald: '#10b981'
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Menlo', 'Monaco', 'Courier New', 'monospace']
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body {
+      background-color: #080d1a;
+      color: #f8fafc;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #0b1120;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 3px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+    .quad-box {
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .quad-box:hover {
+      transform: translateY(-2px);
+    }
+    .sec-chip {
+      transition: all 0.15s ease;
+    }
+    @keyframes toastIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes toastOut {
+      from { transform: translateX(0); opacity: 1; }
+      to { transform: translateX(100%); opacity: 0; }
+    }
+    .toast-enter {
+      animation: toastIn 0.25s ease-out forwards;
+    }
+    .toast-exit {
+      animation: toastOut 0.25s ease-in forwards;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col custom-scrollbar">
+
+  <!-- TOP HEADER -->
+  <header class="border-b border-brand-border bg-[#0b1120] sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-4">
+        <div class="flex items-center space-x-2">
+          <span class="inline-block w-3 h-3 rounded-full bg-blue-500 animate-pulse"></span>
+          <h1 class="text-lg font-bold tracking-wider text-slate-100 uppercase">
+            Options Skew Map <span class="text-blue-400 font-mono text-sm ml-1">// SWING DESK</span>
+          </h1>
+        </div>
+
+        <!-- MARKET SWITCHER (US vs IDX) -->
+        <div class="inline-flex rounded-lg bg-slate-800/90 p-1 border border-slate-700 text-xs font-semibold">
+          <button id="mkt-btn-us" onclick="setMarket('US')" class="px-3 py-1 rounded transition flex items-center space-x-1.5 bg-blue-600 text-white shadow-sm">
+            <span>🇺🇸 US Equities</span>
+            <span class="text-[10px] opacity-75 font-mono">(Options)</span>
+          </button>
+          <button id="mkt-btn-idx" onclick="setMarket('IDX')" class="px-3 py-1 rounded transition flex items-center space-x-1.5 text-slate-400 hover:text-white">
+            <span>🇮🇩 Indonesia (IDX)</span>
+            <span class="text-[10px] opacity-75 font-mono">(IHSG)</span>
+          </button>
+        </div>
+
+        <span id="scan-date-badge" class="hidden md:inline-block px-2.5 py-0.5 rounded text-xs font-mono bg-slate-800 text-slate-400 border border-slate-700">
+          DATE: LOADING...
+        </span>
+      </div>
+
+      <!-- ACTIONS & CONTROLS -->
+      <div class="flex items-center space-x-2.5">
+        <!-- Snapshot Selector -->
+        <select id="snapshot-select" onchange="onSnapshotSelectChange(this.value)" class="bg-slate-800 border border-slate-700 text-xs rounded px-2.5 py-1.5 text-slate-300 focus:outline-none focus:border-blue-500">
+          <optgroup label="Latest Market Scans">
+            <option value="latest_us">🇺🇸 Latest US Scan</option>
+            <option value="latest_idx">🇮🇩 Latest IDX Scan</option>
+          </optgroup>
+          <optgroup label="US Snapshots" id="snap-group-us"></optgroup>
+          <optgroup label="IDX Snapshots" id="snap-group-idx"></optgroup>
+        </select>
+
+        <!-- Live Scan Button -->
+        <button id="btn-scan" onclick="triggerLiveScan()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded transition flex items-center space-x-1.5 shadow">
+          <svg id="scan-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          <span id="scan-btn-text">Run Scan</span>
+        </button>
+
+        <!-- Export CSV Button -->
+        <button onclick="downloadCSV()" class="border border-slate-700 hover:border-slate-500 bg-slate-800 text-slate-300 text-xs font-semibold px-2.5 py-1.5 rounded transition flex items-center space-x-1">
+          <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          <span class="hidden sm:inline">CSV</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- MAIN NAVIGATION TABS -->
+    <div class="border-t border-brand-border bg-[#0d1424]">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex space-x-6 text-xs font-semibold">
+        <button onclick="switchMainTab('desk')" id="nav-tab-desk" class="py-2.5 border-b-2 border-blue-500 text-white flex items-center space-x-1.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+          <span>Skew Map Desk</span>
+        </button>
+
+        <button onclick="switchMainTab('sandbox')" id="nav-tab-sandbox" class="py-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-1.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+          <span>Function Sandbox & Greeks</span>
+        </button>
+
+        <button onclick="switchMainTab('architecture')" id="nav-tab-architecture" class="py-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-1.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"/></svg>
+          <span>System Architecture & 7 Decisions</span>
+        </button>
+
+        <button onclick="switchMainTab('tuner')" id="nav-tab-tuner" class="py-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-1.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+          <span>Threshold Tuner & Settings</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ======================== TAB 1: SKEW MAP DESK ======================== -->
+  <main id="view-desk" class="main-view flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- KPI STRIP -->
+    <section class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div class="bg-brand-card border border-brand-border rounded-lg p-3.5">
+        <div class="text-[11px] uppercase tracking-wider text-brand-muted font-medium">Coverage Board</div>
+        <div class="mt-1 flex items-baseline justify-between">
+          <span id="kpi-coverage" class="text-xl font-bold text-white">—</span>
+          <span id="kpi-chains" class="text-xs text-slate-400 font-mono">0 valid</span>
+        </div>
+      </div>
+
+      <div class="bg-brand-card border border-brand-border rounded-lg p-3.5">
+        <div class="text-[11px] uppercase tracking-wider text-brand-muted font-medium">Market Vol Median</div>
+        <div class="mt-1 flex items-baseline justify-between">
+          <span id="kpi-median-vol" class="text-xl font-bold text-white">—</span>
+          <span class="text-xs text-slate-400 font-mono">vol pts</span>
+        </div>
+      </div>
+
+      <div class="bg-brand-card border border-brand-border rounded-lg p-3.5">
+        <div class="text-[11px] uppercase tracking-wider text-amber-500 font-medium">Most Hedged Sector</div>
+        <div class="mt-1 flex items-baseline justify-between">
+          <span id="kpi-most-hedged" class="text-sm font-bold text-amber-400 truncate">—</span>
+          <span id="kpi-hedged-pts" class="text-xs font-mono text-amber-300 ml-1">+0.0</span>
+        </div>
+      </div>
+
+      <div class="bg-brand-card border border-brand-border rounded-lg p-3.5">
+        <div class="text-[11px] uppercase tracking-wider text-blue-400 font-medium">Most Upside Bid</div>
+        <div class="mt-1 flex items-baseline justify-between">
+          <span id="kpi-most-call" class="text-sm font-bold text-blue-400 truncate">—</span>
+          <span id="kpi-call-pts" class="text-xs font-mono text-blue-300 ml-1">-0.0</span>
+        </div>
+      </div>
+
+      <div class="bg-brand-card border border-brand-border rounded-lg p-3.5">
+        <div class="text-[11px] uppercase tracking-wider text-brand-muted font-medium">Benchmark Reference</div>
+        <div id="kpi-benchmarks-container" class="mt-1 text-xs font-mono text-slate-300 flex items-center justify-between">
+          <span>SPY: —</span>
+        </div>
+      </div>
+
+      <div class="bg-brand-card border border-brand-border rounded-lg p-3.5">
+        <div class="text-[11px] uppercase tracking-wider text-red-400 font-medium">Caution Flags</div>
+        <div class="mt-1 flex items-baseline justify-between">
+          <span id="kpi-cautions" class="text-xl font-bold text-red-400">0</span>
+          <span class="text-[11px] text-slate-400">hedged rally</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- TODAY'S READ CARD -->
+    <section class="bg-brand-card border border-brand-border rounded-lg p-5">
+      <div class="flex items-center justify-between border-b border-brand-border pb-3 mb-3">
+        <div class="flex items-center space-x-2">
+          <span class="text-blue-400 font-bold text-sm tracking-wide uppercase">Today's Written Read</span>
+          <span id="read-methodology-tag" class="text-xs text-slate-500 font-mono">— Auto-generated from tape & skew positioning</span>
+        </div>
+        <div class="text-xs text-slate-400 font-mono" id="read-timestamp">Rule-based verdict</div>
+      </div>
+      <div id="todays-read-content" class="space-y-2 text-sm text-slate-300 leading-relaxed">
+        <p class="text-slate-400 italic">Loading market positioning narrative...</p>
+      </div>
+    </section>
+
+    <!-- RADAR MAP & SECTOR BARS SPLIT -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- THE NAME RADAR (Left 2 Columns) -->
+      <div class="lg:col-span-2 bg-brand-card border border-brand-border rounded-lg p-5 flex flex-col">
+        <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-brand-border">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+              <span>The Name Radar</span>
+              <span class="text-xs font-normal text-slate-400 font-mono">// 4 Quadrants</span>
+            </h2>
+            <p id="radar-subtext" class="text-xs text-slate-400 mt-0.5">X-axis: Return | Y-axis: Normalized Skew [(Put IV - Call IV) / ATM IV]</p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <!-- Horizon Lens -->
+            <div class="inline-flex rounded-md shadow-sm bg-slate-800 p-0.5 border border-slate-700" role="group">
+              <button onclick="setHorizon('1m')" id="btn-hz-1m" class="px-2.5 py-1 text-xs font-semibold rounded bg-blue-600 text-white">1-Month</button>
+              <button onclick="setHorizon('1w')" id="btn-hz-1w" class="px-2.5 py-1 text-xs font-semibold rounded text-slate-400 hover:text-white">1-Week</button>
+              <button onclick="setHorizon('1d')" id="btn-hz-1d" class="px-2.5 py-1 text-xs font-semibold rounded text-slate-400 hover:text-white">1-Day</button>
+            </div>
+
+            <!-- Benchmark Relative Toggle -->
+            <button onclick="toggleSpyRelative()" id="btn-spy-rel" class="px-2.5 py-1 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700">
+              vs BENCH: OFF
+            </button>
+
+            <!-- Crosshair Center Toggle: Zero vs Median -->
+            <button onclick="toggleCrosshairCenter()" id="btn-center-mode" class="px-2.5 py-1 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700" title="Switch between absolute (0,0) center and universe median center">
+              Center: ZERO
+            </button>
+
+            <!-- Watchlist Toggle -->
+            <button onclick="toggleWatchlistFilter()" id="btn-wl-filter" class="px-2.5 py-1 text-xs font-semibold rounded bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700">
+              Watchlist: ALL
+            </button>
+          </div>
+        </div>
+
+        <!-- Sector Filter Chips -->
+        <div id="sector-chips" class="flex flex-wrap gap-1.5 py-3 border-b border-brand-border text-xs">
+          <button onclick="filterSector('ALL')" class="sec-chip px-2.5 py-0.5 rounded-full font-medium bg-blue-900/60 text-blue-300 border border-blue-500/40">All Sectors</button>
+        </div>
+
+        <!-- Scatter Plot Canvas Container -->
+        <div class="relative w-full h-[500px] mt-4">
+          <canvas id="radarCanvas"></canvas>
+        </div>
+
+        <!-- Quadrant Legend Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4 pt-3 border-t border-brand-border text-xs">
+          <div class="p-2.5 rounded bg-blue-950/30 border border-blue-800/40">
+            <span class="font-bold text-blue-400">🔵 CONTRARIAN BID</span>
+            <div class="text-[11px] text-slate-300 mt-0.5">Down on month, calls bid.</div>
+            <div class="text-[10px] text-blue-300 font-mono mt-1 font-semibold">ACTION: Watchlist</div>
+          </div>
+          <div class="p-2.5 rounded bg-orange-950/30 border border-orange-800/40">
+            <span class="font-bold text-orange-400">🟠 CHASE</span>
+            <div class="text-[11px] text-slate-300 mt-0.5">Up on month, calls bid.</div>
+            <div class="text-[10px] text-orange-300 font-mono mt-1 font-semibold">ACTION: Crowded / Late</div>
+          </div>
+          <div class="p-2.5 rounded bg-yellow-950/30 border border-yellow-800/40">
+            <span class="font-bold text-yellow-400">🟡 HEDGED RALLY</span>
+            <div class="text-[11px] text-slate-300 mt-0.5">Up on month, puts bid.</div>
+            <div class="text-[10px] text-yellow-300 font-mono mt-1 font-semibold">ACTION: Tighten Stops</div>
+          </div>
+          <div class="p-2.5 rounded bg-red-950/30 border border-red-800/40">
+            <span class="font-bold text-red-400">🔴 FEAR</span>
+            <div class="text-[11px] text-slate-300 mt-0.5">Down on month, puts bid.</div>
+            <div class="text-[10px] text-red-300 font-mono mt-1 font-semibold">ACTION: Leave Alone</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SECTOR SKEW BARS (Right 1 Column) -->
+      <div class="bg-brand-card border border-brand-border rounded-lg p-5 flex flex-col justify-between">
+        <div>
+          <div class="border-b border-brand-border pb-3">
+            <h2 class="text-base font-bold text-white flex items-center justify-between">
+              <span>Sector Skew (Vol Points)</span>
+              <span class="text-[11px] font-mono text-slate-400 font-normal">Trap #2 Guard</span>
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">
+              Un-normalized Vol Points vs benchmark reference lines (SPY, QQQ, IWM / IHSG)
+            </p>
+          </div>
+
+          <div class="relative w-full h-[380px] mt-4">
+            <canvas id="sectorBarCanvas"></canvas>
+          </div>
+        </div>
+
+        <div class="mt-4 p-3 bg-slate-900/80 rounded border border-slate-800 text-xs text-slate-400 space-y-1">
+          <div class="flex items-center space-x-1.5 font-medium text-slate-300">
+            <svg class="w-4 h-4 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span>Trap #3 Agreement Guard (60% Rule)</span>
+          </div>
+          <p class="text-[11px] leading-relaxed">
+            Sectors with &lt;60% agreement trigger a breadth caveat. Average skew cannot be trusted when driven by single-stock outliers.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTOR CONSENSUS BREAKDOWN & CONSTITUENT HEAT GRID (Trap #3 Guard) -->
+    <section class="bg-brand-card border border-brand-border rounded-lg p-5">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-brand-border pb-3 mb-4">
+        <div>
+          <h2 class="text-base font-bold text-white flex items-center space-x-2">
+            <span>Sector Consensus Breakdown &amp; Constituent Heat Grid</span>
+            <span class="text-xs font-mono text-amber-400 px-2 py-0.5 rounded bg-amber-950/60 border border-amber-800/60">TRAP #3 GUARD</span>
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">Inspect internal sector unity: Put Bid (amber) vs. Call Bid (blue) across constituent names.</p>
+        </div>
+        <div class="text-xs font-mono text-slate-400">
+          Showing: <span id="sector-grid-filter-label" class="text-blue-400 font-bold">All Sectors</span>
+        </div>
+      </div>
+
+      <div id="sector-heat-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="col-span-full py-8 text-center text-slate-500 font-mono text-xs">Loading sector consensus data...</div>
+      </div>
+    </section>
+
+    <!-- ACTION BOARD -->
+    <section class="bg-brand-card border border-brand-border rounded-lg p-5">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-brand-border pb-3 mb-4">
+        <div>
+          <h2 class="text-base font-bold text-white flex items-center space-x-2">
+            <span>The Action Board</span>
+            <span class="text-xs font-mono text-slate-400">// Ranked Shortlists</span>
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">Filtered, classified, and sorted by positioning intensity</p>
+        </div>
+
+        <div class="flex space-x-1 bg-slate-800 p-1 rounded-md text-xs font-semibold overflow-x-auto">
+          <button onclick="switchActionTab('contrarian_bids')" id="tab-btn-cb" class="px-3 py-1 rounded bg-blue-600 text-white whitespace-nowrap">Contrarian Bids (<span id="count-tab-cb">0</span>)</button>
+          <button onclick="switchActionTab('chase')" id="tab-btn-chase" class="px-3 py-1 rounded text-slate-400 hover:text-white whitespace-nowrap">Chase (<span id="count-tab-chase">0</span>)</button>
+          <button onclick="switchActionTab('hedged_rally')" id="tab-btn-hr" class="px-3 py-1 rounded text-slate-400 hover:text-white whitespace-nowrap">Hedged Rally (<span id="count-tab-hr">0</span>)</button>
+          <button onclick="switchActionTab('fear')" id="tab-btn-fear" class="px-3 py-1 rounded text-slate-400 hover:text-white whitespace-nowrap">Fear (<span id="count-tab-fear">0</span>)</button>
+        </div>
+      </div>
+
+      <div id="action-cards-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+    </section>
+
+    <!-- EXPLORER TABLE -->
+    <section class="bg-brand-card border border-brand-border rounded-lg p-5">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-brand-border pb-3 mb-4">
+        <div>
+          <h2 class="text-base font-bold text-white flex items-center space-x-2">
+            <span>Skew Database Explorer</span>
+            <span class="text-xs font-mono text-slate-400">// Table View</span>
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">Complete universe with Black-Scholes Greeks, Δ vs last week, and quality filters. Click any column header to sort.</p>
+        </div>
+
+        <div class="flex items-center space-x-2">
+          <input type="text" id="table-search" oninput="renderTable()" placeholder="Search ticker or sector..." class="bg-slate-800 border border-slate-700 text-xs rounded px-3 py-1.5 text-slate-300 w-48 focus:outline-none focus:border-blue-500">
+          
+          <select id="table-quadrant-filter" onchange="renderTable()" class="bg-slate-800 border border-slate-700 text-xs rounded px-2.5 py-1.5 text-slate-300 focus:outline-none">
+            <option value="ALL">All Quadrants</option>
+            <option value="CONTRARIAN BID">Contrarian Bid</option>
+            <option value="CHASE">Chase</option>
+            <option value="HEDGED RALLY">Hedged Rally</option>
+            <option value="FEAR">Fear</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto custom-scrollbar">
+        <table class="min-w-full divide-y divide-brand-border text-left text-xs font-sans">
+          <thead class="bg-slate-900/80 font-mono text-slate-400 uppercase tracking-wider select-none">
+            <tr>
+              <th class="py-3 px-3 cursor-pointer hover:text-white" onclick="sortTable('symbol')">Ticker <span id="th-sort-symbol">↕</span></th>
+              <th class="py-3 px-3 cursor-pointer hover:text-white" onclick="sortTable('sector')">Sector <span id="th-sort-sector">↕</span></th>
+              <th class="py-3 px-3 cursor-pointer hover:text-white" onclick="sortTable('spot')">Spot <span id="th-sort-spot">↕</span></th>
+              <th class="py-3 px-3 cursor-pointer hover:text-white" onclick="sortTable('atm_iv')">ATM IV <span id="th-sort-atm_iv">↕</span></th>
+              <th class="py-3 px-3 cursor-pointer hover:text-white" onclick="sortTable('put_iv')">Put IV <span id="th-sort-put_iv">↕</span></th>
+              <th class="py-3 px-3 cursor-pointer hover:text-white" onclick="sortTable('call_iv')">Call IV <span id="th-sort-call_iv">↕</span></th>
+              <th class="py-3 px-3 cursor-pointer hover:text-white" onclick="sortTable('skew')">Skew (Norm) <span id="th-sort-skew">↕</span></th>
+              <th class="py-3 px-3 cursor-pointer hover:text-white" onclick="sortTable('vol_points')">Vol Pts <span id="th-sort-vol_points">↕</span></th>
+              <th class="py-3 px-3 cursor-pointer hover:text-white" onclick="sortTable('return_1m')">1M Ret <span id="th-sort-return_1m">↕</span></th>
+              <th class="py-3 px-3 cursor-pointer hover:text-white" onclick="sortTable('return_1m_vs_spy')" id="th-bench-col">vs Bench <span id="th-sort-return_1m_vs_spy">↕</span></th>
+              <th class="py-3 px-3 cursor-pointer hover:text-white" onclick="sortTable('rvol')">RVOL <span id="th-sort-rvol">↕</span></th>
+              <th class="py-3 px-3">Catalyst</th>
+              <th class="py-3 px-3 cursor-pointer hover:text-white" onclick="sortTable('delta_skew')">Δ Last Wk <span id="th-sort-delta_skew">↕</span></th>
+              <th class="py-3 px-3 cursor-pointer hover:text-white" onclick="sortTable('quadrant')">Quadrant / Verdict <span id="th-sort-quadrant">↕</span></th>
+            </tr>
+          </thead>
+          <tbody id="explorer-tbody" class="divide-y divide-slate-800/60 font-mono text-slate-300"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ======================== TAB 2: FUNCTION SANDBOX & GREEKS ======================== -->
+  <main id="view-sandbox" class="main-view hidden flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    <div class="bg-brand-card border border-brand-border rounded-lg p-6">
+      
+      <!-- Sandbox Header -->
+      <div class="border-b border-brand-border pb-4 mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-xl font-bold text-white flex items-center space-x-2">
+            <span>Interactive Greeks &amp; Skew Sandbox</span>
+            <span class="text-xs px-2.5 py-0.5 rounded bg-blue-900/50 text-blue-300 font-mono">LIVE SOLVER</span>
+          </h2>
+          <p class="text-xs text-slate-400 mt-1">
+            Simulate underlying stock prices, strike implied volatilities, Black-Scholes Greeks, and observe real-time 4-quadrant verdict &amp; Part 5 sentence generation.
+          </p>
+        </div>
+
+        <!-- Sandbox Market Regime Switcher -->
+        <div class="inline-flex rounded-lg bg-slate-900 p-1 border border-slate-700 text-xs font-semibold self-start sm:self-auto">
+          <button id="sb-mkt-us" onclick="setSandboxMarket('US')" class="px-3 py-1.5 rounded transition flex items-center space-x-1.5 bg-blue-600 text-white shadow-sm">
+            <span>🇺🇸 US Options</span>
+          </button>
+          <button id="sb-mkt-idx" onclick="setSandboxMarket('IDX')" class="px-3 py-1.5 rounded transition flex items-center space-x-1.5 text-slate-400 hover:text-white">
+            <span>🇮🇩 IDX Realized Vol</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Presets Toolbar (Dynamic for US vs IDX) -->
+      <div class="mb-6 flex flex-wrap items-center gap-2 text-xs font-semibold">
+        <span class="text-slate-400 uppercase font-mono text-[11px] mr-1">Quick Presets:</span>
+        <div id="sb-presets-container" class="flex flex-wrap gap-2"></div>
+      </div>
+
+      <!-- Sandbox Grid: Left Form, Right Result -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        
+        <!-- Input Form -->
+        <div class="space-y-4 text-xs font-mono">
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="text-slate-400 block mb-1">Ticker Symbol</label>
+              <input type="text" id="sb-symbol" value="NVDA" oninput="debouncedSandboxCalculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+              <label class="text-slate-400 block mb-1">Sector</label>
+              <input type="text" id="sb-sector" value="Technology" oninput="debouncedSandboxCalculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+              <label id="lbl-sb-spot" class="text-slate-400 block mb-1">Spot Price ($)</label>
+              <input type="number" id="sb-spot" value="120.0" step="0.5" oninput="debouncedSandboxCalculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-blue-500">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <label id="lbl-sb-atm-iv" class="text-slate-400 block mb-1">ATM IV (%)</label>
+              <input type="number" id="sb-atm-iv" value="32.0" step="0.5" oninput="debouncedSandboxCalculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+              <label id="lbl-sb-put-iv" class="text-slate-400 block mb-1">25Δ Put IV (%)</label>
+              <input type="number" id="sb-put-iv" value="33.5" step="0.5" oninput="debouncedSandboxCalculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+              <label id="lbl-sb-call-iv" class="text-slate-400 block mb-1">25Δ Call IV (%)</label>
+              <input type="number" id="sb-call-iv" value="31.0" step="0.5" oninput="debouncedSandboxCalculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+              <label id="lbl-sb-dte" class="text-slate-400 block mb-1">DTE (Days)</label>
+              <input type="number" id="sb-dte" value="34" step="1" oninput="debouncedSandboxCalculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-blue-500">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <label class="text-slate-400 block mb-1">1M Return (%)</label>
+              <input type="number" id="sb-ret-1m" value="-3.5" step="0.5" oninput="debouncedSandboxCalculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+              <label id="lbl-sb-bench" class="text-slate-400 block mb-1">vs SPY (%)</label>
+              <input type="number" id="sb-ret-bench" value="-2.1" step="0.5" oninput="debouncedSandboxCalculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+              <label class="text-slate-400 block mb-1">RVOL (x AvgVol)</label>
+              <input type="number" id="sb-rvol" value="1.45" step="0.05" oninput="debouncedSandboxCalculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+              <label class="text-slate-400 block mb-1">Sector Rank (%)</label>
+              <input type="number" id="sb-sec-rank" value="35" min="0" max="100" oninput="debouncedSandboxCalculate()" class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-blue-500">
+            </div>
+          </div>
+
+          <div class="pt-2">
+            <button onclick="runSandboxCalculate()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded transition shadow-lg flex items-center justify-center space-x-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              <span>Recalculate Model</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Live Output Panel -->
+        <div class="bg-slate-900/90 rounded-xl p-6 border border-slate-800 flex flex-col justify-between space-y-6">
+          <div>
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div class="flex items-center space-x-3">
+                <span id="res-sb-ticker" class="text-2xl font-black text-white">NVDA</span>
+                <span id="res-sb-badge" class="px-2.5 py-0.5 rounded text-xs font-bold uppercase tracking-wider bg-blue-950 text-blue-400 border border-blue-800/50">CONTRARIAN BID</span>
+              </div>
+              <span id="res-sb-ceiling-status" class="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800">
+                TRAP #4: PASS
+              </span>
+            </div>
+
+            <!-- Mathematical Core Metrics -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-xs font-mono">
+              <div class="bg-slate-800/70 p-3 rounded-lg border border-slate-700/50">
+                <span id="lbl-res-skew" class="text-slate-400 block text-[10px]">Normalized Skew</span>
+                <span id="res-sb-skew" class="text-lg font-bold text-white mt-1 block">+0.0781</span>
+              </div>
+              <div class="bg-slate-800/70 p-3 rounded-lg border border-slate-700/50">
+                <span class="text-slate-400 block text-[10px]">Raw Vol Points</span>
+                <span id="res-sb-volpts" class="text-lg font-bold text-white mt-1 block">+2.5 pts</span>
+              </div>
+              <div class="bg-slate-800/70 p-3 rounded-lg border border-slate-700/50">
+                <span id="lbl-res-m1" class="text-slate-400 block text-[10px]">Call Delta</span>
+                <span id="res-sb-calldelta" class="text-lg font-bold text-white mt-1 block">0.25</span>
+              </div>
+              <div class="bg-slate-800/70 p-3 rounded-lg border border-slate-700/50">
+                <span id="lbl-res-m2" class="text-slate-400 block text-[10px]">Put Delta</span>
+                <span id="res-sb-putdelta" class="text-lg font-bold text-white mt-1 block">-0.25</span>
+              </div>
+            </div>
+
+            <!-- Real-time Standard Part 5 Sentence -->
+            <div class="mt-5 p-4 rounded-lg bg-slate-950 border border-slate-800">
+              <div class="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold mb-1">Generated Sentence (Part 5 Standard)</div>
+              <p id="res-sb-sentence" class="text-sm font-sans text-slate-200 leading-relaxed italic">
+                NVDA — traders are paying slightly more for puts, which is more fear than 35% of its sector. The stock is down 3.5% on the month (-2.1% vs SPY), on heavy volume (1.45x RVOL). That puts it in FEAR — Leave Alone.
+              </p>
+            </div>
+          </div>
+
+          <div class="text-[11px] text-slate-500 font-mono">
+            * Real-time live solver: every parameter input updates the model instantaneously.
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- ======================== TAB 3: SYSTEM ARCHITECTURE & 7 DECISIONS ======================== -->
+  <main id="view-architecture" class="main-view hidden flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    
+    <div class="bg-brand-card border border-brand-border rounded-lg p-6">
+      <h2 class="text-xl font-bold text-white flex items-center space-x-2">
+        <span>System Architecture &amp; The 7 Decisions Flow</span>
+      </h2>
+      <p class="text-xs text-slate-400 mt-1">
+        Interactive visualization of Bert Trading's 7 architectural decisions and 5 trap guardrails.
+      </p>
+
+      <!-- The 7 Decisions Interactive Timeline -->
+      <div class="mt-8 space-y-4">
+        <h3 class="text-sm font-bold text-blue-400 uppercase font-mono tracking-wider">The 7 Decisions Pipeline</h3>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <!-- Decision 1 -->
+          <div class="p-3.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-blue-500 transition">
+            <div class="flex items-center justify-between text-blue-400 font-mono font-bold">
+              <span>Decision #1</span>
+              <span class="text-[10px] bg-blue-950 px-1.5 py-0.5 rounded border border-blue-800">Delta Solver</span>
+            </div>
+            <div class="font-bold text-slate-100 mt-1">Probability-Equidistant Strikes</div>
+            <p class="text-slate-400 mt-1 text-[11px] leading-relaxed">
+              Finds 25-delta Call and 25-delta Put using Black-Scholes. Prevents percentage moneyness distortion between calm vs volatile stocks.
+            </p>
+          </div>
+
+          <!-- Decision 2 -->
+          <div class="p-3.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-blue-500 transition">
+            <div class="flex items-center justify-between text-blue-400 font-mono font-bold">
+              <span>Decision #2</span>
+              <span class="text-[10px] bg-blue-950 px-1.5 py-0.5 rounded border border-blue-800">Expiry Rule</span>
+            </div>
+            <div class="font-bold text-slate-100 mt-1">Target Monthly Contract</div>
+            <p class="text-slate-400 mt-1 text-[11px] leading-relaxed">
+              Selects standard 3rd Friday contract (~30-45 DTE). Avoids front-week noise and gamma decay distortion across names.
+            </p>
+          </div>
+
+          <!-- Decision 3 -->
+          <div class="p-3.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-blue-500 transition">
+            <div class="flex items-center justify-between text-blue-400 font-mono font-bold">
+              <span>Decision #3</span>
+              <span class="text-[10px] bg-blue-950 px-1.5 py-0.5 rounded border border-blue-800">Normalization</span>
+            </div>
+            <div class="font-bold text-slate-100 mt-1">Skew vs. Vol Points Dual Core</div>
+            <p class="text-slate-400 mt-1 text-[11px] leading-relaxed">
+              Normalized Skew for intra-sector ranking; un-normalized Vol Points for cross-sector comparisons (Trap #2 guard).
+            </p>
+          </div>
+
+          <!-- Decision 4 -->
+          <div class="p-3.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-blue-500 transition">
+            <div class="flex items-center justify-between text-blue-400 font-mono font-bold">
+              <span>Decision #4</span>
+              <span class="text-[10px] bg-blue-950 px-1.5 py-0.5 rounded border border-blue-800">Benchmark</span>
+            </div>
+            <div class="font-bold text-slate-100 mt-1">Independent Sector Benchmarking</div>
+            <p class="text-slate-400 mt-1 text-[11px] leading-relaxed">
+              Benchmarks against broad neutral universes (SPY, QQQ, IWM, and ^JKSE for IDX), preventing personal watchlist bias from laundering back as market signals.
+            </p>
+          </div>
+
+          <!-- Decision 5 -->
+          <div class="p-3.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-blue-500 transition">
+            <div class="flex items-center justify-between text-blue-400 font-mono font-bold">
+              <span>Decision #5</span>
+              <span class="text-[10px] bg-blue-950 px-1.5 py-0.5 rounded border border-blue-800">Quality Bar</span>
+            </div>
+            <div class="font-bold text-slate-100 mt-1">Open Interest &amp; Liquidity Check</div>
+            <p class="text-slate-400 mt-1 text-[11px] leading-relaxed">
+              Requires min open interest on target strikes. Thin, untrustworthy chains are tagged and displayed as hollow rings rather than quietly dropped.
+            </p>
+          </div>
+
+          <!-- Decision 6 -->
+          <div class="p-3.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-blue-500 transition">
+            <div class="flex items-center justify-between text-blue-400 font-mono font-bold">
+              <span>Decision #6</span>
+              <span class="text-[10px] bg-blue-950 px-1.5 py-0.5 rounded border border-blue-800">Sanity Ceiling</span>
+            </div>
+            <div class="font-bold text-slate-100 mt-1">Trap #4 Quote Artifact Filter</div>
+            <p class="text-slate-400 mt-1 text-[11px] leading-relaxed">
+              Enforces hard ceilings (|Skew| &le; 1.25). Rejects single-leg bad marks (like the Duke Energy -1.43 bug) before they distort sector metrics.
+            </p>
+          </div>
+
+          <!-- Decision 7 -->
+          <div class="p-3.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-blue-500 transition">
+            <div class="flex items-center justify-between text-blue-400 font-mono font-bold">
+              <span>Decision #7</span>
+              <span class="text-[10px] bg-blue-950 px-1.5 py-0.5 rounded border border-blue-800">History Storage</span>
+            </div>
+            <div class="font-bold text-slate-100 mt-1">Week-over-Week Delta Tracking</div>
+            <p class="text-slate-400 mt-1 text-[11px] leading-relaxed">
+              Stores daily snapshots in data/snapshots/. Level is structural; change is the true signal. Tracks &Delta; Skew and quadrant flips.
+            </p>
+          </div>
+
+          <!-- IDX Extension -->
+          <div class="p-3.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-emerald-500 transition">
+            <div class="flex items-center justify-between text-emerald-400 font-mono font-bold">
+              <span>IDX Module</span>
+              <span class="text-[10px] bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-800">Emerging Mkt</span>
+            </div>
+            <div class="font-bold text-slate-100 mt-1">Realized Volatility Asymmetry</div>
+            <p class="text-slate-400 mt-1 text-[11px] leading-relaxed">
+              For markets without listed equity options (IDX), computes downside vs. upside semi-variance skew against IHSG (^JKSE).
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- The 5 Traps Breakdown -->
+      <div class="mt-8 space-y-4 pt-6 border-t border-brand-border">
+        <h3 class="text-sm font-bold text-amber-400 uppercase font-mono tracking-wider">The 5 Traps &amp; Guardrails</h3>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          <div class="p-4 rounded-lg bg-slate-900/80 border border-slate-800">
+            <div class="font-bold text-slate-200">Trap #1: Never Quote an Index Put/Call Ratio</div>
+            <p class="text-slate-400 mt-1 leading-relaxed">
+              86% of SPY put open interest sits in deep tail crash insurance (&lt;0.10 delta). Counting the whole chain returns arbitrary sentiment. The system isolates 25-delta probability-equidistant strikes.
+            </p>
+          </div>
+
+          <div class="p-4 rounded-lg bg-slate-900/80 border border-slate-800">
+            <div class="font-bold text-slate-200">Trap #2: Don't Compare Sectors Using Normalized Skew</div>
+            <p class="text-slate-400 mt-1 leading-relaxed">
+              ATM IV varies 3x between Utilities and Semis. Dividing by a low ATM IV makes Utilities float to the top of fear rankings every day. Cross-sector charts use raw Vol Points.
+            </p>
+          </div>
+
+          <div class="p-4 rounded-lg bg-slate-900/80 border border-slate-800">
+            <div class="font-bold text-slate-200">Trap #3: Check Agreement Before Trusting Sector Reads</div>
+            <p class="text-slate-400 mt-1 leading-relaxed">
+              Averages hide internal splits. If constituent agreement is below 60%, the system automatically attaches a breadth caveat flag.
+            </p>
+          </div>
+
+          <div class="p-4 rounded-lg bg-slate-900/80 border border-slate-800">
+            <div class="font-bold text-slate-200">Trap #4: One Bad Quote Inverts an Entire Name</div>
+            <p class="text-slate-400 mt-1 leading-relaxed">
+              A single wide spread or bad mark can flip a stock to a false extreme bid and drag correlation down. Handled via a strict sanity ceiling (|Skew| &le; 1.25).
+            </p>
+          </div>
+
+          <div class="p-4 rounded-lg bg-slate-900/80 border border-slate-800 md:col-span-2">
+            <div class="font-bold text-slate-200">Trap #5: A Dated Catalyst is Not Sentiment</div>
+            <p class="text-slate-400 mt-1 leading-relaxed">
+              If an earnings announcement lands inside the measured expiry, front options carry elevated IV due to the event. The engine flags this as Event Premium, preventing false fear readings.
+            </p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ======================== TAB 4: THRESHOLD TUNER & SETTINGS ======================== -->
+  <main id="view-tuner" class="main-view hidden flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    <div class="bg-brand-card border border-brand-border rounded-lg p-6 max-w-3xl mx-auto">
+      <div class="border-b border-brand-border pb-4 mb-6">
+        <h2 class="text-xl font-bold text-white flex items-center space-x-2">
+          <span>System Parameters &amp; Threshold Tuner</span>
+          <span class="text-xs px-2.5 py-0.5 rounded bg-blue-900/50 text-blue-300 font-mono">SETTINGS</span>
+        </h2>
+        <p class="text-xs text-slate-400 mt-1">
+          Adjust the 7 decisions parameters in real-time. Changes immediately update future scans and calculations.
+        </p>
+      </div>
+
+      <div class="space-y-6 text-xs font-mono">
+        <!-- Target Delta Slider -->
+        <div class="bg-slate-900 p-4 rounded-lg border border-slate-800">
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-sm font-bold text-white">Decision #1: Target Strike Delta</label>
+            <span id="val-cfg-delta" class="text-blue-400 font-bold text-sm">0.25 (25Δ)</span>
+          </div>
+          <input type="range" id="cfg-delta" min="0.15" max="0.35" step="0.01" value="0.25" oninput="document.getElementById('val-cfg-delta').textContent = this.value + ' (' + Math.round(this.value*100) + 'Δ)'" class="w-full accent-blue-500">
+          <p class="text-slate-400 text-[11px] mt-1.5 font-sans">Probability level for OTM Put and OTM Call equidistant strike solver.</p>
+        </div>
+
+        <!-- Agreement Threshold Slider -->
+        <div class="bg-slate-900 p-4 rounded-lg border border-slate-800">
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-sm font-bold text-white">Trap #3: Sector Agreement Threshold</label>
+            <span id="val-cfg-agreement" class="text-amber-400 font-bold text-sm">60%</span>
+          </div>
+          <input type="range" id="cfg-agreement" min="0.50" max="0.80" step="0.05" value="0.60" oninput="document.getElementById('val-cfg-agreement').textContent = Math.round(this.value*100) + '%'" class="w-full accent-amber-500">
+          <p class="text-slate-400 text-[11px] mt-1.5 font-sans">Minimum constituent consensus required before validating a sector move.</p>
+        </div>
+
+        <!-- Sanity Ceiling Slider -->
+        <div class="bg-slate-900 p-4 rounded-lg border border-slate-800">
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-sm font-bold text-white">Trap #4: Sanity Ceiling (Max |Skew|)</label>
+            <span id="val-cfg-ceiling" class="text-red-400 font-bold text-sm">1.25</span>
+          </div>
+          <input type="range" id="cfg-ceiling" min="0.60" max="2.00" step="0.05" value="1.25" oninput="document.getElementById('val-cfg-ceiling').textContent = this.value" class="w-full accent-red-500">
+          <p class="text-slate-400 text-[11px] mt-1.5 font-sans">Hard rejection ceiling for normalized skew to eliminate quote artifacts.</p>
+        </div>
+
+        <!-- Expiry DTE Window -->
+        <div class="grid grid-cols-2 gap-4">
+          <div class="bg-slate-900 p-4 rounded-lg border border-slate-800">
+            <label class="text-sm font-bold text-white block mb-1">Decision #2: Min DTE</label>
+            <input type="number" id="cfg-min-dte" value="18" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-white font-mono focus:outline-none focus:border-blue-500">
+            <p class="text-slate-400 text-[11px] mt-1 font-sans">Avoid front-week expiry noise.</p>
+          </div>
+          <div class="bg-slate-900 p-4 rounded-lg border border-slate-800">
+            <label class="text-sm font-bold text-white block mb-1">Decision #2: Max DTE</label>
+            <input type="number" id="cfg-max-dte" value="55" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-white font-mono focus:outline-none focus:border-blue-500">
+            <p class="text-slate-400 text-[11px] mt-1 font-sans">Active swing trading horizon.</p>
+          </div>
+        </div>
+
+        <div class="pt-4 flex justify-end">
+          <button onclick="saveConfigSettings()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-2.5 rounded transition shadow-lg flex items-center space-x-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            <span>Save Configuration Settings</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- DETAIL MODAL POPUP -->
+  <div id="modal-backdrop" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4" onclick="closeModal()">
+    <div class="bg-brand-card border border-slate-700 rounded-xl max-w-lg w-full p-6 shadow-2xl relative" onclick="event.stopPropagation()">
+      <button onclick="closeModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white text-lg font-bold">&times;</button>
+      
+      <div class="flex items-center space-x-3 mb-4">
+        <span id="modal-ticker" class="text-2xl font-black text-white">—</span>
+        <span id="modal-quadrant-badge" class="px-2.5 py-0.5 rounded text-xs font-bold font-sans uppercase border">—</span>
+      </div>
+
+      <div class="bg-slate-900/90 rounded-lg p-4 border border-slate-800 mb-5">
+        <div class="text-[10px] uppercase font-mono text-slate-400 tracking-wider mb-1.5 font-bold">Standard Row Readout (Part 5)</div>
+        <p id="modal-sentence" class="text-sm font-sans text-slate-200 leading-relaxed italic">—</p>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono mb-4">
+        <div class="bg-slate-800/60 p-2.5 rounded border border-slate-700/50">
+          <span class="text-slate-400 block text-[10px]">ATM IV</span>
+          <span id="modal-atm-iv" class="text-white font-bold text-sm">—</span>
+        </div>
+        <div class="bg-slate-800/60 p-2.5 rounded border border-slate-700/50">
+          <span class="text-slate-400 block text-[10px]">Put IV</span>
+          <span id="modal-put-iv" class="text-white font-bold text-sm">—</span>
+        </div>
+        <div class="bg-slate-800/60 p-2.5 rounded border border-slate-700/50">
+          <span class="text-slate-400 block text-[10px]">Call IV</span>
+          <span id="modal-call-iv" class="text-white font-bold text-sm">—</span>
+        </div>
+        <div class="bg-slate-800/60 p-2.5 rounded border border-slate-700/50">
+          <span class="text-slate-400 block text-[10px]">Vol Points</span>
+          <span id="modal-vol-pts" class="text-white font-bold text-sm">—</span>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono text-slate-400">
+        <div class="bg-slate-900 p-2 rounded border border-slate-800">
+          <span>1M Return:</span> <strong id="modal-ret-1m" class="text-white">—</strong>
+        </div>
+        <div class="bg-slate-900 p-2 rounded border border-slate-800">
+          <span>RVOL:</span> <strong id="modal-rvol" class="text-white">—</strong>
+        </div>
+        <div class="bg-slate-900 p-2 rounded border border-slate-800">
+          <span>Sector Rank:</span> <strong id="modal-sec-rank" class="text-white">—</strong>
+        </div>
+      </div>
+
+      <div class="mt-5 flex justify-end">
+        <button onclick="closeModal()" class="px-4 py-1.5 rounded bg-slate-800 text-slate-300 hover:bg-slate-700 text-xs font-semibold">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+  <!-- ======================== JAVASCRIPT APPLICATION CORE ======================== -->
+  <script>
+    // Global Application State
+    let CURRENT_MARKET = 'US';       // 'US' or 'IDX'
+    let SANDBOX_MARKET = 'US';       // 'US' or 'IDX' for Sandbox Tab
+    let APP_DATA = null;
+    let RADAR_CHART = null;
+    let SECTOR_CHART = null;
+
+    let CURRENT_HORIZON = '1m';     // '1m', '1w', '1d'
+    let BENCH_RELATIVE = false;
+    let WATCHLIST_ONLY = false;
+    let CROSSHAIR_MODE = 'zero';     // 'zero' (0,0) or 'median'
+    let SELECTED_SECTOR = 'ALL';
+    let ACTIVE_ACTION_TAB = 'contrarian_bids';
+
+    let TABLE_SORT_KEY = 'skew';
+    let TABLE_SORT_ASC = false;
+    let SANDBOX_DEBOUNCE_TIMER = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      fetchData(CURRENT_MARKET);
+      fetchSnapshots();
+      fetchRuntimeConfig();
+      renderSandboxPresets();
+    });
+
+    // TOAST NOTIFICATION SYSTEM
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      
+      const colors = {
+        success: 'bg-emerald-950 border-emerald-700 text-emerald-200',
+        warning: 'bg-amber-950 border-amber-700 text-amber-200',
+        error: 'bg-red-950 border-red-700 text-red-200',
+        info: 'bg-slate-900 border-slate-700 text-slate-200'
+      };
+      const icons = {
+        success: '✓',
+        warning: '⚠️',
+        error: '✕',
+        info: 'ℹ'
+      };
+
+      toast.className = `toast-enter pointer-events-auto flex items-center space-x-2.5 px-4 py-3 rounded-lg border shadow-xl text-xs font-mono max-w-sm ${colors[type] || colors.info}`;
+      toast.innerHTML = `<span class="font-bold">${icons[type] || '•'}</span><span>${message}</span>`;
+      
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.classList.remove('toast-enter');
+        toast.classList.add('toast-exit');
+        setTimeout(() => toast.remove(), 250);
+      }, 3500);
+    }
+
+    // MARKET UI SYNCHRONIZER
+    function updateMarketUI(m) {
+      CURRENT_MARKET = m;
+      document.getElementById('mkt-btn-us').className = `px-3 py-1 rounded transition flex items-center space-x-1.5 ${m === 'US' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`;
+      document.getElementById('mkt-btn-idx').className = `px-3 py-1 rounded transition flex items-center space-x-1.5 ${m === 'IDX' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`;
+      
+      const benchName = (m === 'IDX') ? 'IHSG' : 'SPY';
+      document.getElementById('btn-spy-rel').textContent = `vs ${benchName}: ${BENCH_RELATIVE ? 'ON' : 'OFF'}`;
+      const thBench = document.getElementById('th-bench-col');
+      if (thBench) thBench.innerHTML = `vs ${benchName} <span id="th-sort-return_1m_vs_spy">↕</span>`;
+    }
+
+    // MARKET SWITCHER (From Top Buttons)
+    function setMarket(m) {
+      updateMarketUI(m);
+      const sel = document.getElementById('snapshot-select');
+      sel.value = (m === 'IDX' ? 'latest_idx' : 'latest_us');
+      SELECTED_SECTOR = 'ALL';
+      fetchData(m);
+      showToast(`Switched to ${m === 'US' ? 'US Equities (Options Chain)' : 'Indonesia IDX (Realized Vol Asymmetry)'}`, 'info');
+    }
+
+    // SNAPSHOT SELECT HANDLER (From Dropdown)
+    function onSnapshotSelectChange(val) {
+      if (val === 'latest_us') {
+        setMarket('US');
+      } else if (val === 'latest_idx') {
+        setMarket('IDX');
+      } else if (val) {
+        loadSnapshot(val);
+      }
+    }
+
+    // MAIN NAVIGATION TAB SWITCHER
+    function switchMainTab(tab) {
+      document.querySelectorAll('.main-view').forEach(el => el.classList.add('hidden'));
+      document.getElementById(`view-${tab}`).classList.remove('hidden');
+
+      ['desk', 'sandbox', 'architecture', 'tuner'].forEach(t => {
+        const btn = document.getElementById(`nav-tab-${t}`);
+        if (t === tab) {
+          btn.className = "py-2.5 border-b-2 border-blue-500 text-white flex items-center space-x-1.5";
+        } else {
+          btn.className = "py-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-1.5";
+        }
+      });
+
+      if (tab === 'desk' && APP_DATA) {
+        setTimeout(() => {
+          renderRadarChart();
+          renderSectorBarChart();
+          renderSectorHeatGrid();
+        }, 50);
+      } else if (tab === 'sandbox') {
+        runSandboxCalculate();
+      }
+    }
+
+    // DATA RETRIEVAL
+    async function fetchData(m) {
+      try {
+        const res = await fetch(`/api/data?market=${m}`);
+        const data = await res.json();
+        if (data.status === 'no_data') {
+          document.getElementById('todays-read-content').innerHTML = `
+            <div class="p-4 bg-blue-950/40 rounded border border-blue-800/50 text-blue-200">
+              <p class="font-bold">No snapshot data found for ${m} market.</p>
+              <p class="text-xs text-blue-300 mt-1">Click "Run Scan" above to compute options skew / tape asymmetry for ${m}.</p>
+            </div>`;
+          return;
+        }
+        APP_DATA = data;
+        renderDashboard();
+      } catch (e) {
+        console.error("Error fetching data:", e);
+        showToast("Error loading market data", "error");
+      }
+    }
+
+    async function fetchSnapshots() {
+      try {
+        const res = await fetch(`/api/snapshots`);
+        const data = await res.json();
+        const sel = document.getElementById('snapshot-select');
+        
+        sel.innerHTML = `
+          <optgroup label="Latest Market Scans">
+            <option value="latest_us" ${CURRENT_MARKET === 'US' ? 'selected' : ''}>🇺🇸 Latest US Scan</option>
+            <option value="latest_idx" ${CURRENT_MARKET === 'IDX' ? 'selected' : ''}>🇮🇩 Latest IDX Scan</option>
+          </optgroup>
+        `;
+
+        const usGroup = document.createElement('optgroup');
+        usGroup.label = "US Snapshots";
+        const idxGroup = document.createElement('optgroup');
+        idxGroup.label = "IDX Snapshots";
+
+        (data.all_snapshots || data.snapshots || []).forEach(snapDate => {
+          const opt = document.createElement('option');
+          opt.value = snapDate;
+          const isIdx = snapDate.includes('_idx');
+          const cleanDate = snapDate.replace('_idx', '');
+          opt.textContent = `${isIdx ? '🇮🇩 IDX' : '🇺🇸 US'} — ${cleanDate}`;
+          if (isIdx) {
+            idxGroup.appendChild(opt);
+          } else {
+            usGroup.appendChild(opt);
+          }
+        });
+
+        if (usGroup.children.length > 0) sel.appendChild(usGroup);
+        if (idxGroup.children.length > 0) sel.appendChild(idxGroup);
+      } catch (e) {
+        console.error("Error fetching snapshots:", e);
+      }
+    }
+
+    async function loadSnapshot(snapDate) {
+      if (!snapDate) return;
+      try {
+        const res = await fetch(`/api/snapshots/${snapDate}`);
+        const data = await res.json();
+        const detectedMarket = (data.market || (snapDate.includes('_idx') ? 'IDX' : 'US')).toUpperCase();
+        updateMarketUI(detectedMarket);
+        APP_DATA = data;
+        renderDashboard();
+        showToast(`Loaded ${detectedMarket} snapshot: ${snapDate}`, 'success');
+      } catch (e) {
+        console.error("Error loading snapshot:", e);
+        showToast("Failed to load snapshot", "error");
+      }
+    }
+
+    async function triggerLiveScan() {
+      const btn = document.getElementById('btn-scan');
+      const btnText = document.getElementById('scan-btn-text');
+      const icon = document.getElementById('scan-icon');
+
+      btn.disabled = true;
+      btnText.textContent = `Scanning ${CURRENT_MARKET}...`;
+      icon.classList.add('animate-spin');
+      showToast(`Initiating scan for ${CURRENT_MARKET}...`, 'info');
+
+      try {
+        await fetch(`/api/scan?market=${CURRENT_MARKET}`, { method: 'POST' });
+        const pollInterval = setInterval(async () => {
+          const sRes = await fetch('/api/scan-status');
+          const sData = await sRes.json();
+          if (!sData.is_scanning) {
+            clearInterval(pollInterval);
+            btn.disabled = false;
+            btnText.textContent = "Run Scan";
+            icon.classList.remove('animate-spin');
+            fetchData(CURRENT_MARKET);
+            fetchSnapshots();
+            showToast(`${CURRENT_MARKET} scan completed successfully!`, 'success');
+          }
+        }, 2000);
+      } catch (e) {
+        console.error("Scan error:", e);
+        btn.disabled = false;
+        btnText.textContent = "Run Scan";
+        icon.classList.remove('animate-spin');
+        showToast("Scan failed to trigger", "error");
+      }
+    }
+
+    function downloadCSV() {
+      showToast(`Generating ${CURRENT_MARKET} CSV export...`, 'info');
+      window.location.href = `/api/export-csv?market=${CURRENT_MARKET}`;
+    }
+
+    // DASHBOARD RENDERING
+    function renderDashboard() {
+      if (!APP_DATA) return;
+
+      document.getElementById('scan-date-badge').textContent = `${CURRENT_MARKET} DATE: ${APP_DATA.scan_date || 'LIVE'}`;
+      document.getElementById('kpi-coverage').textContent = `${APP_DATA.valid_count || 0} / ${APP_DATA.total_count || 0}`;
+      document.getElementById('kpi-chains').textContent = `${(APP_DATA.total_count || 0) - (APP_DATA.valid_count || 0)} filtered`;
+
+      const medVol = APP_DATA.market_median_vol_points || 0.0;
+      document.getElementById('kpi-median-vol').textContent = `${medVol > 0 ? '+' : ''}${medVol.toFixed(1)}`;
+
+      const mh = APP_DATA.most_hedged_sector;
+      if (mh) {
+        document.getElementById('kpi-most-hedged').textContent = mh.sector;
+        document.getElementById('kpi-hedged-pts').textContent = `${mh.avg_vol_points > 0 ? '+' : ''}${mh.avg_vol_points.toFixed(1)} pts`;
+      } else {
+        document.getElementById('kpi-most-hedged').textContent = "—";
+        document.getElementById('kpi-hedged-pts').textContent = "";
+      }
+
+      const mcb = APP_DATA.most_call_bid_sector;
+      if (mcb) {
+        document.getElementById('kpi-most-call').textContent = mcb.sector;
+        document.getElementById('kpi-call-pts').textContent = `${mcb.avg_vol_points > 0 ? '+' : ''}${mcb.avg_vol_points.toFixed(1)} pts`;
+      } else {
+        document.getElementById('kpi-most-call').textContent = "—";
+        document.getElementById('kpi-call-pts').textContent = "";
+      }
+
+      // Benchmarks display
+      const idxRef = APP_DATA.index_references || {};
+      const benchContainer = document.getElementById('kpi-benchmarks-container');
+      benchContainer.innerHTML = '';
+      if (CURRENT_MARKET === 'IDX') {
+        const pts = idxRef['^JKSE'] ? idxRef['^JKSE'].vol_points : null;
+        benchContainer.innerHTML = `<span>IHSG (^JKSE): ${pts !== null ? (pts > 0 ? '+' : '') + pts.toFixed(1) : '—'} pts</span>`;
+      } else {
+        benchContainer.innerHTML = `
+          <span>SPY: ${idxRef.SPY ? (idxRef.SPY.vol_points > 0 ? '+' : '') + idxRef.SPY.vol_points.toFixed(1) : '—'}</span>
+          <span class="mx-1">|</span>
+          <span>QQQ: ${idxRef.QQQ ? (idxRef.QQQ.vol_points > 0 ? '+' : '') + idxRef.QQQ.vol_points.toFixed(1) : '—'}</span>
+        `;
+      }
+
+      document.getElementById('kpi-cautions').textContent = (APP_DATA.caution_flags || []).length;
+
+      // Methodology Tag
+      const methTag = document.getElementById('read-methodology-tag');
+      if (CURRENT_MARKET === 'IDX') {
+        methTag.textContent = '— Realized Volatility Asymmetry / Semi-Variance Skew Model (IDX)';
+        document.getElementById('radar-subtext').textContent = 'X-axis: Return | Y-axis: Realized Volatility Asymmetry Skew (Tape Downside vs Upside)';
+      } else {
+        methTag.textContent = '— Delta-Equidistant 25Δ Options Implied Volatility Skew';
+        document.getElementById('radar-subtext').textContent = 'X-axis: Return | Y-axis: Normalized Skew [(Put IV - Call IV) / ATM IV]';
+      }
+
+      renderTodaysRead();
+      renderSectorChips();
+      renderRadarChart();
+      renderSectorBarChart();
+      renderSectorHeatGrid();
+      renderActionBoard();
+      renderTable();
+    }
+
+    function renderTodaysRead() {
+      const tr = APP_DATA.todays_read || {};
+      const container = document.getElementById('todays-read-content');
+      container.innerHTML = '';
+
+      (tr.paragraphs || []).forEach((p) => {
+        const pElem = document.createElement('p');
+        pElem.className = 'text-slate-300 leading-relaxed';
+        if (p.includes('⚠️ Caution Flag:')) {
+          pElem.className = 'p-2.5 rounded bg-amber-950/40 border border-amber-800/40 text-amber-200 font-medium';
+        } else if (p.includes('🔵 Contrarian Bids:')) {
+          pElem.className = 'p-2.5 rounded bg-blue-950/40 border border-blue-800/40 text-blue-200 font-medium';
+        } else if (p.includes('⚡ Breadth Caveat:')) {
+          pElem.className = 'p-2.5 rounded bg-rose-950/40 border border-rose-800/40 text-rose-200 text-xs';
+        }
+        pElem.textContent = p;
+        container.appendChild(pElem);
+      });
+    }
+
+    function renderSectorChips() {
+      const container = document.getElementById('sector-chips');
+      const sectors = Object.keys(APP_DATA.sector_summaries || {});
+      
+      let html = `<button onclick="filterSector('ALL')" class="sec-chip px-2.5 py-0.5 rounded-full font-medium ${SELECTED_SECTOR === 'ALL' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700'}">All Sectors</button>`;
+      
+      sectors.forEach(sec => {
+        const isSel = (SELECTED_SECTOR === sec);
+        html += `<button onclick="filterSector('${sec}')" class="sec-chip px-2.5 py-0.5 rounded-full font-medium ${isSel ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700'}">${sec}</button>`;
+      });
+
+      container.innerHTML = html;
+      document.getElementById('sector-grid-filter-label').textContent = SELECTED_SECTOR === 'ALL' ? 'All Sectors' : SELECTED_SECTOR;
+    }
+
+    function filterSector(sec) {
+      SELECTED_SECTOR = sec;
+      renderSectorChips();
+      renderRadarChart();
+      renderSectorHeatGrid();
+      renderTable();
+    }
+
+    function setHorizon(hz) {
+      CURRENT_HORIZON = hz;
+      ['1m', '1w', '1d'].forEach(h => {
+        const btn = document.getElementById(`btn-hz-${h}`);
+        btn.className = (h === hz) ? "px-2.5 py-1 text-xs font-semibold rounded bg-blue-600 text-white shadow-sm" : "px-2.5 py-1 text-xs font-semibold rounded text-slate-400 hover:text-white";
+      });
+      renderRadarChart();
+    }
+
+    function toggleSpyRelative() {
+      BENCH_RELATIVE = !BENCH_RELATIVE;
+      const bName = (CURRENT_MARKET === 'IDX') ? 'IHSG' : 'SPY';
+      const btn = document.getElementById('btn-spy-rel');
+      btn.textContent = `vs ${bName}: ${BENCH_RELATIVE ? 'ON' : 'OFF'}`;
+      btn.className = `px-2.5 py-1 text-xs font-semibold rounded ${BENCH_RELATIVE ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'} border border-slate-700`;
+      renderRadarChart();
+    }
+
+    function toggleCrosshairCenter() {
+      CROSSHAIR_MODE = (CROSSHAIR_MODE === 'zero') ? 'median' : 'zero';
+      const btn = document.getElementById('btn-center-mode');
+      btn.textContent = `Center: ${CROSSHAIR_MODE.toUpperCase()}`;
+      btn.className = `px-2.5 py-1 text-xs font-semibold rounded ${CROSSHAIR_MODE === 'median' ? 'bg-amber-600 text-white shadow-sm' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'} border border-slate-700`;
+      renderRadarChart();
+      showToast(`Scatter crosshair center set to ${CROSSHAIR_MODE.toUpperCase()}`, 'info');
+    }
+
+    function toggleWatchlistFilter() {
+      WATCHLIST_ONLY = !WATCHLIST_ONLY;
+      const btn = document.getElementById('btn-wl-filter');
+      btn.textContent = `Watchlist: ${WATCHLIST_ONLY ? 'ONLY' : 'ALL'}`;
+      btn.className = `px-2.5 py-1 text-xs font-semibold rounded ${WATCHLIST_ONLY ? 'bg-amber-600 text-white shadow-sm' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'} border border-slate-700`;
+      renderRadarChart();
+      renderTable();
+    }
+
+    // =========================================================================
+    // CHART.JS CUSTOM PLUGIN 1: 4-QUADRANT SHADED BACKGROUNDS & CROSSHAIRS
+    // =========================================================================
+    const quadrantBackgroundPlugin = {
+      id: 'quadrantBackgroundPlugin',
+      beforeDraw: (chart) => {
+        const { ctx, chartArea, scales: { x, y } } = chart;
+        if (!chartArea) return;
+        const { left, right, top, bottom } = chartArea;
+
+        let cxVal = 0.0;
+        let cyVal = 0.0;
+
+        if (CROSSHAIR_MODE === 'median' && APP_DATA) {
+          const rows = (APP_DATA.rows || []).filter(r => r.chain_ok && r.skew !== null);
+          if (rows.length > 0) {
+            const skews = rows.map(r => r.skew).sort((a, b) => a - b);
+            const rets = rows.map(r => (BENCH_RELATIVE ? r.return_1m_vs_spy : r.return_1m) || 0).sort((a, b) => a - b);
+            const mid = Math.floor(rows.length / 2);
+            cyVal = skews[mid];
+            cxVal = rets[mid];
+          }
+        }
+
+        let cxPix = x.getPixelForValue(cxVal);
+        let cyPix = y.getPixelForValue(cyVal);
+
+        cxPix = Math.max(left, Math.min(right, cxPix));
+        cyPix = Math.max(top, Math.min(bottom, cyPix));
+
+        ctx.save();
+
+        // Shaded Quadrant Background Tints:
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.07)';
+        ctx.fillRect(left, top, cxPix - left, cyPix - top);
+
+        ctx.fillStyle = 'rgba(234, 179, 8, 0.07)';
+        ctx.fillRect(cxPix, top, right - cxPix, cyPix - top);
+
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.07)';
+        ctx.fillRect(left, cyPix, cxPix - left, bottom - cyPix);
+
+        ctx.fillStyle = 'rgba(249, 115, 22, 0.07)';
+        ctx.fillRect(cxPix, cyPix, right - cxPix, bottom - cyPix);
+
+        // Dashed Crosshair Lines
+        ctx.beginPath();
+        ctx.setLineDash([5, 5]);
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#475569';
+
+        ctx.moveTo(cxPix, top);
+        ctx.lineTo(cxPix, bottom);
+
+        ctx.moveTo(left, cyPix);
+        ctx.lineTo(right, cyPix);
+        ctx.stroke();
+
+        // Watermark Quadrant Titles
+        ctx.font = 'bold 11px monospace';
+
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.35)';
+        ctx.textAlign = 'left';
+        ctx.fillText('🔴 FEAR (DOWN / PUTS BID)', left + 12, top + 20);
+
+        ctx.fillStyle = 'rgba(234, 179, 8, 0.35)';
+        ctx.textAlign = 'right';
+        ctx.fillText('🟡 HEDGED RALLY (UP / PUTS BID)', right - 12, top + 20);
+
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.35)';
+        ctx.textAlign = 'left';
+        ctx.fillText('🔵 CONTRARIAN BID (DOWN / CALLS BID)', left + 12, bottom - 12);
+
+        ctx.fillStyle = 'rgba(249, 115, 22, 0.35)';
+        ctx.textAlign = 'right';
+        ctx.fillText('🟠 CHASE (UP / CALLS BID)', right - 12, bottom - 12);
+
+        ctx.restore();
+      }
+    };
+
+    // RADAR SCATTER PLOT
+    function renderRadarChart() {
+      const ctx = document.getElementById('radarCanvas').getContext('2d');
+      if (RADAR_CHART) RADAR_CHART.destroy();
+
+      const allRows = (APP_DATA ? APP_DATA.rows : []) || [];
+      const filtered = allRows.filter(r => {
+        if (!r.chain_ok || r.skew === null) return false;
+        if (WATCHLIST_ONLY && !r.is_watchlist) return false;
+        if (SELECTED_SECTOR !== 'ALL' && r.sector !== SELECTED_SECTOR) return false;
+        return true;
+      });
+
+      const bName = (CURRENT_MARKET === 'IDX') ? 'IHSG' : 'SPY';
+
+      const dataPoints = filtered.map(r => {
+        let retVal = 0.0;
+        if (CURRENT_HORIZON === '1m') {
+          retVal = BENCH_RELATIVE ? r.return_1m_vs_spy : r.return_1m;
+        } else if (CURRENT_HORIZON === '1w') {
+          retVal = r.return_1w;
+        } else {
+          retVal = r.return_1d;
+        }
+
+        let ptColor = '#3b82f6';
+        if (retVal >= 0 && r.skew < 0) ptColor = '#f97316';
+        else if (retVal >= 0 && r.skew >= 0) ptColor = '#eab308';
+        else if (retVal < 0 && r.skew >= 0) ptColor = '#ef4444';
+
+        return {
+          x: retVal,
+          y: r.skew,
+          rawRow: r,
+          pointBackgroundColor: ptColor,
+          pointBorderColor: r.is_watchlist ? '#ffffff' : ptColor,
+          pointBorderWidth: r.is_watchlist ? 2.5 : 1,
+          pointRadius: r.is_watchlist ? 7.5 : 5
+        };
+      });
+
+      RADAR_CHART = new Chart(ctx, {
+        type: 'scatter',
+        data: {
+          datasets: [{
+            label: 'Names',
+            data: dataPoints,
+            pointBackgroundColor: dataPoints.map(d => d.pointBackgroundColor),
+            pointBorderColor: dataPoints.map(d => d.pointBorderColor),
+            pointBorderWidth: dataPoints.map(d => d.pointBorderWidth),
+            pointRadius: dataPoints.map(d => d.pointRadius),
+            hoverRadius: 9
+          }]
+        },
+        plugins: [quadrantBackgroundPlugin],
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 250 },
+          layout: {
+            padding: { top: 10, right: 15, bottom: 10, left: 10 }
+          },
+          scales: {
+            x: {
+              title: { display: true, text: `Return (${CURRENT_HORIZON.toUpperCase()}${BENCH_RELATIVE ? ' vs ' + bName : ''}) %`, color: '#94a3b8' },
+              grid: { color: '#1e293b' },
+              ticks: { color: '#94a3b8', font: { family: 'monospace' } }
+            },
+            y: {
+              title: { 
+                display: true, 
+                text: CURRENT_MARKET === 'IDX' ? 'Realized Vol Asymmetry Skew' : 'Normalized Skew [(Put IV - Call IV) / ATM IV]', 
+                color: '#94a3b8' 
+              },
+              grid: { color: '#1e293b' },
+              ticks: { color: '#94a3b8', font: { family: 'monospace' } }
+            }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#0f172a',
+              borderColor: '#334155',
+              borderWidth: 1,
+              padding: 12,
+              displayColors: false,
+              callbacks: {
+                title: items => {
+                  const r = items[0].raw.rawRow;
+                  const spotFmt = CURRENT_MARKET === 'IDX' ? 'Rp' + r.spot.toLocaleString() : '$' + r.spot.toFixed(2);
+                  return `${r.symbol} (${r.sector}) — ${spotFmt}`;
+                },
+                label: item => {
+                  const r = item.raw.rawRow;
+                  const q = r.quadrant_1m ? r.quadrant_1m.badge : '';
+                  return [
+                    `Quadrant: ${q}`,
+                    `Skew: ${r.skew > 0 ? '+' : ''}${r.skew} | Vol Pts: ${r.vol_points > 0 ? '+' : ''}${r.vol_points} pts`,
+                    `1M Return: ${r.return_1m >= 0 ? '+' : ''}${r.return_1m}% | RVOL: ${r.rvol}x`,
+                    r.has_catalyst ? `⚠️ EARNINGS: ${r.earnings_date}` : '',
+                    '',
+                    r.sentence_readout || '',
+                    '[Click to inspect full details]'
+                  ].filter(Boolean);
+                }
+              }
+            }
+          },
+          onClick: (evt, elements) => {
+            if (elements.length > 0) openModal(dataPoints[elements[0].index].rawRow);
+          }
+        }
+      });
+    }
+
+    // =========================================================================
+    // CHART.JS CUSTOM PLUGIN 2: SECTOR BAR BENCHMARK REFERENCE LINES (Trap #2)
+    // =========================================================================
+    const sectorBenchmarkPlugin = {
+      id: 'sectorBenchmarkPlugin',
+      afterDraw: (chart) => {
+        const { ctx, chartArea, scales: { x } } = chart;
+        if (!chartArea || !APP_DATA) return;
+        const { top, bottom, left, right } = chartArea;
+
+        const idxRef = APP_DATA.index_references || {};
+        const benchmarks = CURRENT_MARKET === 'IDX'
+          ? [{ symbol: 'IHSG (^JKSE)', pts: idxRef['^JKSE']?.vol_points, color: '#10b981' }]
+          : [
+              { symbol: 'SPY', pts: idxRef['SPY']?.vol_points, color: '#60a5fa' },
+              { symbol: 'QQQ', pts: idxRef['QQQ']?.vol_points, color: '#a78bfa' },
+              { symbol: 'IWM', pts: idxRef['IWM']?.vol_points, color: '#fb923c' }
+            ];
+
+        benchmarks.forEach((bm, i) => {
+          if (bm.pts === undefined || bm.pts === null) return;
+          const xPix = x.getPixelForValue(bm.pts);
+          if (xPix < left || xPix > right) return;
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.setLineDash([4, 4]);
+          ctx.strokeStyle = bm.color;
+          ctx.lineWidth = 1.5;
+          ctx.moveTo(xPix, top);
+          ctx.lineTo(xPix, bottom);
+          ctx.stroke();
+
+          ctx.fillStyle = bm.color;
+          ctx.font = 'bold 9.5px monospace';
+          ctx.textAlign = 'center';
+          const yPos = top - 6 - ((i % 2) * 12);
+          ctx.fillText(`${bm.symbol}: ${bm.pts > 0 ? '+' : ''}${bm.pts.toFixed(1)}`, xPix, yPos);
+          ctx.restore();
+        });
+      }
+    };
+
+    // SECTOR SKEW BARS
+    function renderSectorBarChart() {
+      const ctx = document.getElementById('sectorBarCanvas').getContext('2d');
+      if (SECTOR_CHART) SECTOR_CHART.destroy();
+
+      const summaries = Object.values((APP_DATA ? APP_DATA.sector_summaries : {}) || {});
+      summaries.sort((a, b) => b.avg_vol_points - a.avg_vol_points);
+
+      const labels = summaries.map(s => s.sector);
+      const values = summaries.map(s => s.avg_vol_points);
+      const barColors = summaries.map(s => s.avg_vol_points >= 0 ? 'rgba(234, 179, 8, 0.7)' : 'rgba(59, 130, 246, 0.7)');
+
+      SECTOR_CHART = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: values,
+            backgroundColor: barColors,
+            borderColor: barColors.map(c => c.replace('0.7', '1')),
+            borderWidth: 1,
+            borderRadius: 4
+          }]
+        },
+        plugins: [sectorBenchmarkPlugin],
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: {
+            padding: { top: 24, right: 10, bottom: 5, left: 5 }
+          },
+          scales: {
+            x: {
+              title: { display: true, text: 'Vol Points (Put IV - Call IV)', color: '#94a3b8' },
+              grid: { color: '#1e293b' },
+              ticks: { color: '#94a3b8', font: { family: 'monospace' } }
+            },
+            y: { grid: { display: false }, ticks: { color: '#e2e8f0', font: { size: 11 } } }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#0f172a',
+              borderColor: '#334155',
+              borderWidth: 1,
+              callbacks: {
+                label: ctx => {
+                  const s = summaries[ctx.dataIndex];
+                  const caveat = s.has_caveat ? ` [CAVEAT: ${s.agreement_pct}% consensus]` : ` [${s.agreement_pct}% agreement]`;
+                  return `${s.avg_vol_points > 0 ? '+' : ''}${s.avg_vol_points} vol pts${caveat}`;
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // SECTOR CONSENSUS BREAKDOWN & CONSTITUENT HEAT GRID (Trap #3 Guard)
+    function renderSectorHeatGrid() {
+      const container = document.getElementById('sector-heat-grid');
+      if (!APP_DATA || !APP_DATA.sector_summaries) {
+        container.innerHTML = `<div class="col-span-full py-8 text-center text-slate-500 font-mono text-xs">No sector consensus data available.</div>`;
+        return;
+      }
+
+      container.innerHTML = '';
+      const allRows = (APP_DATA.rows || []).filter(r => r.chain_ok);
+      let sectorKeys = Object.keys(APP_DATA.sector_summaries);
+
+      if (SELECTED_SECTOR !== 'ALL') {
+        sectorKeys = sectorKeys.filter(s => s === SELECTED_SECTOR);
+      }
+
+      if (sectorKeys.length === 0) {
+        container.innerHTML = `<div class="col-span-full py-8 text-center text-slate-500 font-mono text-xs">No sectors matching filter.</div>`;
+        return;
+      }
+
+      sectorKeys.forEach(secName => {
+        const secSummary = APP_DATA.sector_summaries[secName];
+        const constituents = allRows.filter(r => r.sector === secName);
+        const card = document.createElement('div');
+        card.className = "bg-slate-900/80 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-between";
+
+        const hasCaveat = secSummary.has_caveat;
+        const agreementPct = secSummary.agreement_pct || 0;
+        const avgPts = secSummary.avg_vol_points || 0;
+        const side = avgPts >= 0 ? 'PUTS BID' : 'CALLS BID';
+
+        const badgeCls = hasCaveat
+          ? 'bg-red-950/80 text-red-400 border border-red-800/80'
+          : 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/80';
+        const badgeText = hasCaveat
+          ? `${agreementPct}% ${side} ⚠️ CAVEAT`
+          : `${agreementPct}% ${side} (UNIFIED)`;
+
+        let tilesHtml = '';
+        constituents.forEach(c => {
+          const isPut = (c.vol_points !== null && c.vol_points >= 0);
+          const tileBg = isPut
+            ? 'bg-amber-950/40 text-amber-300 border-amber-800/50 hover:bg-amber-900/50'
+            : 'bg-blue-950/40 text-blue-300 border-blue-800/50 hover:bg-blue-900/50';
+          const catTag = c.has_catalyst ? '<span class="text-red-400 ml-1">⚠️</span>' : '';
+          const ptsText = c.vol_points !== null ? (c.vol_points > 0 ? '+' : '') + c.vol_points.toFixed(1) : '—';
+
+          tilesHtml += `
+            <div onclick="openModalBySymbol('${c.symbol}')" title="${c.symbol}: ${ptsText} pts (${c.sentence_readout || ''})" class="cursor-pointer px-2 py-1 rounded border text-[11px] font-mono flex items-center justify-between transition ${tileBg}">
+              <span class="font-bold">${c.symbol}${catTag}</span>
+              <span class="text-[10px] opacity-80 ml-1">${ptsText}</span>
+            </div>
+          `;
+        });
+
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-2.5">
+              <div>
+                <span class="font-bold text-white text-xs">${secName}</span>
+                <span class="text-[11px] text-slate-400 font-mono ml-1.5">Avg: ${avgPts > 0 ? '+' : ''}${avgPts.toFixed(1)} pts</span>
+              </div>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded font-bold ${badgeCls}">${badgeText}</span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5 mt-1">
+              ${tilesHtml}
+            </div>
+          </div>
+          <div class="mt-2.5 pt-2 border-t border-slate-800/60 text-[10px] text-slate-500 font-mono flex justify-between">
+            <span>${constituents.length} constituents</span>
+            <span>Trap #3 Guard</span>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function openModalBySymbol(sym) {
+      if (!APP_DATA || !APP_DATA.rows) return;
+      const row = APP_DATA.rows.find(r => r.symbol === sym);
+      if (row) openModal(row);
+    }
+
+    // ACTION BOARD
+    function switchActionTab(tabKey) {
+      ACTIVE_ACTION_TAB = tabKey;
+      ['cb', 'chase', 'hr', 'fear'].forEach(k => {
+        const mapKey = { 'cb': 'contrarian_bids', 'chase': 'chase', 'hr': 'hedged_rally', 'fear': 'fear' }[k];
+        const btn = document.getElementById(`tab-btn-${k}`);
+        btn.className = (mapKey === tabKey) ? "px-3 py-1 rounded bg-blue-600 text-white whitespace-nowrap shadow-sm" : "px-3 py-1 rounded text-slate-400 hover:text-white whitespace-nowrap";
+      });
+      renderActionBoard();
+    }
+
+    function renderActionBoard() {
+      const ab = (APP_DATA ? APP_DATA.action_board : {}) || {};
+      document.getElementById('count-tab-cb').textContent = (ab.contrarian_bids || []).length;
+      document.getElementById('count-tab-chase').textContent = (ab.chase || []).length;
+      document.getElementById('count-tab-hr').textContent = (ab.hedged_rally || []).length;
+      document.getElementById('count-tab-fear').textContent = (ab.fear || []).length;
+
+      const items = ab[ACTIVE_ACTION_TAB] || [];
+      const container = document.getElementById('action-cards-grid');
+      container.innerHTML = '';
+
+      if (items.length === 0) {
+        container.innerHTML = `<div class="col-span-full py-8 text-center text-slate-500 font-mono text-sm">No names in this bucket today.</div>`;
+        return;
+      }
+
+      items.forEach(r => {
+        const card = document.createElement('div');
+        card.className = "quad-box bg-slate-900/90 border border-slate-800 hover:border-slate-600 rounded-lg p-3.5 cursor-pointer flex flex-col justify-between shadow-sm";
+        card.onclick = () => openModal(r);
+
+        const deltaStr = r.delta_skew_str || '—';
+        const hasCat = r.has_catalyst ? `<span class="px-1.5 py-0.5 rounded bg-red-950 text-red-400 border border-red-800 text-[10px] font-mono ml-2">EARNINGS</span>` : '';
+
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-2">
+                <span class="text-base font-black text-white">${r.symbol}</span>
+                <span class="text-[11px] text-slate-400 font-mono">${r.sector}</span>
+                ${hasCat}
+              </div>
+              <span class="text-xs font-mono font-bold ${r.return_1m >= 0 ? 'text-emerald-400' : 'text-red-400'}">
+                ${r.return_1m >= 0 ? '+' : ''}${r.return_1m.toFixed(1)}%
+              </span>
+            </div>
+
+            <p class="text-xs text-slate-300 mt-2 line-clamp-2 leading-relaxed font-sans">
+              ${r.sentence_readout}
+            </p>
+          </div>
+
+          <div class="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between text-[11px] font-mono text-slate-400">
+            <span>Skew: <b class="text-slate-200">${r.skew > 0 ? '+' : ''}${r.skew}</b> (Δ: <span class="${r.delta_skew > 0 ? 'text-amber-400' : r.delta_skew < 0 ? 'text-blue-400' : 'text-slate-400'}">${deltaStr}</span>)</span>
+            <span>RVOL: <b class="text-slate-200">${r.rvol}x</b></span>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    // EXPLORER TABLE (ROBUST MULTI-TYPE SORTING)
+    function sortTable(key) {
+      if (TABLE_SORT_KEY === key) {
+        TABLE_SORT_ASC = !TABLE_SORT_ASC;
+      } else {
+        TABLE_SORT_KEY = key;
+        TABLE_SORT_ASC = false;
+      }
+      updateTableSortIndicators();
+      renderTable();
+    }
+
+    function updateTableSortIndicators() {
+      const sortableKeys = ['symbol', 'sector', 'spot', 'atm_iv', 'put_iv', 'call_iv', 'skew', 'vol_points', 'return_1m', 'return_1m_vs_spy', 'rvol', 'delta_skew', 'quadrant'];
+      sortableKeys.forEach(k => {
+        const el = document.getElementById(`th-sort-${k}`);
+        if (!el) return;
+        if (k === TABLE_SORT_KEY) {
+          el.textContent = TABLE_SORT_ASC ? '▲' : '▼';
+          el.className = 'text-blue-400 font-bold';
+        } else {
+          el.textContent = '↕';
+          el.className = 'text-slate-600';
+        }
+      });
+    }
+
+    function renderTable() {
+      const qFilter = document.getElementById('table-quadrant-filter').value;
+      const searchStr = document.getElementById('table-search').value.toUpperCase().trim();
+      const tbody = document.getElementById('explorer-tbody');
+      tbody.innerHTML = '';
+
+      let rows = ((APP_DATA ? APP_DATA.rows : []) || []).slice();
+
+      rows = rows.filter(r => {
+        if (WATCHLIST_ONLY && !r.is_watchlist) return false;
+        if (SELECTED_SECTOR !== 'ALL' && r.sector !== SELECTED_SECTOR) return false;
+        if (qFilter !== 'ALL') {
+          const qName = r.quadrant_1m ? r.quadrant_1m.quadrant : '';
+          if (qName !== qFilter) return false;
+        }
+        if (searchStr) {
+          const matchSym = r.symbol.toUpperCase().includes(searchStr);
+          const matchSec = r.sector.toUpperCase().includes(searchStr);
+          if (!matchSym && !matchSec) return false;
+        }
+        return true;
+      });
+
+      rows.sort((a, b) => {
+        let vA, vB;
+        if (TABLE_SORT_KEY === 'quadrant') {
+          vA = a.quadrant_1m ? a.quadrant_1m.quadrant : '';
+          vB = b.quadrant_1m ? b.quadrant_1m.quadrant : '';
+        } else {
+          vA = a[TABLE_SORT_KEY];
+          vB = b[TABLE_SORT_KEY];
+        }
+
+        if (typeof vA === 'string' || typeof vB === 'string') {
+          vA = (vA || '').toString();
+          vB = (vB || '').toString();
+          return TABLE_SORT_ASC ? vA.localeCompare(vB) : vB.localeCompare(vA);
+        }
+
+        vA = (vA !== null && vA !== undefined) ? vA : -999999;
+        vB = (vB !== null && vB !== undefined) ? vB : -999999;
+        return TABLE_SORT_ASC ? (vA - vB) : (vB - vA);
+      });
+
+      rows.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-800/50 cursor-pointer transition";
+        tr.onclick = () => openModal(r);
+
+        const q = r.quadrant_1m || { quadrant: 'UNCLASSIFIED', badge: '—', color: '#64748b' };
+        const retCls = r.return_1m >= 0 ? 'text-emerald-400' : 'text-red-400';
+        const spyCls = r.return_1m_vs_spy >= 0 ? 'text-emerald-400' : 'text-red-400';
+        const spotFmt = CURRENT_MARKET === 'IDX' ? 'Rp' + r.spot.toLocaleString() : '$' + r.spot.toFixed(2);
+
+        tr.innerHTML = `
+          <td class="py-2.5 px-3 font-bold text-white flex items-center space-x-1.5">
+            ${r.is_watchlist ? '<span class="text-amber-400 font-bold">★</span>' : ''}
+            <span>${r.symbol}</span>
+          </td>
+          <td class="py-2.5 px-3 text-slate-400 font-sans">${r.sector}</td>
+          <td class="py-2.5 px-3 text-slate-200">${spotFmt}</td>
+          <td class="py-2.5 px-3 text-slate-300">${r.atm_iv ? r.atm_iv.toFixed(1) + '%' : '—'}</td>
+          <td class="py-2.5 px-3 text-slate-300">${r.put_iv ? r.put_iv.toFixed(1) + '%' : '—'}</td>
+          <td class="py-2.5 px-3 text-slate-300">${r.call_iv ? r.call_iv.toFixed(1) + '%' : '—'}</td>
+          <td class="py-2.5 px-3 font-bold ${r.skew > 0 ? 'text-amber-400' : r.skew < 0 ? 'text-blue-400' : 'text-slate-400'}">
+            ${r.skew !== null ? (r.skew > 0 ? '+' : '') + r.skew.toFixed(4) : '—'}
+          </td>
+          <td class="py-2.5 px-3 text-slate-300">${r.vol_points !== null ? (r.vol_points > 0 ? '+' : '') + r.vol_points.toFixed(1) : '—'}</td>
+          <td class="py-2.5 px-3 font-bold ${retCls}">${r.return_1m !== null ? (r.return_1m >= 0 ? '+' : '') + r.return_1m.toFixed(1) + '%' : '—'}</td>
+          <td class="py-2.5 px-3 ${spyCls}">${r.return_1m_vs_spy !== null ? (r.return_1m_vs_spy >= 0 ? '+' : '') + r.return_1m_vs_spy.toFixed(1) + '%' : '—'}</td>
+          <td class="py-2.5 px-3 text-slate-300">${r.rvol ? r.rvol.toFixed(2) + 'x' : '—'}</td>
+          <td class="py-2.5 px-3 text-slate-400">${r.has_catalyst ? `<span class="text-red-400 font-bold">${r.earnings_date} ⚠️</span>` : (r.earnings_date || 'N/A')}</td>
+          <td class="py-2.5 px-3 ${r.delta_skew > 0 ? 'text-amber-400' : r.delta_skew < 0 ? 'text-blue-400' : 'text-slate-400'}">${r.delta_skew_str || '—'}</td>
+          <td class="py-2.5 px-3">
+            <span class="px-2 py-0.5 rounded text-[10px] font-sans font-bold uppercase" style="background-color: ${q.color}22; color: ${q.color}; border: 1px solid ${q.color}44;">
+              ${q.badge}
+            </span>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // MODAL POPUP
+    function openModal(row) {
+      const spotFmt = CURRENT_MARKET === 'IDX' ? 'Rp' + row.spot.toLocaleString() : '$' + row.spot.toFixed(2);
+      document.getElementById('modal-ticker').textContent = `${row.symbol} — ${spotFmt}`;
+      
+      const q = row.quadrant_1m || { quadrant: 'UNCLASSIFIED', badge: '—', color: '#64748b' };
+      const qBadge = document.getElementById('modal-quadrant-badge');
+      qBadge.textContent = q.badge;
+      qBadge.style.backgroundColor = `${q.color}22`;
+      qBadge.style.color = q.color;
+      qBadge.style.borderColor = `${q.color}55`;
+
+      document.getElementById('modal-sentence').textContent = row.sentence_readout || 'Standard readout unavailable.';
+      document.getElementById('modal-atm-iv').textContent = row.atm_iv ? `${row.atm_iv.toFixed(1)}%` : '—';
+      document.getElementById('modal-put-iv').textContent = row.put_iv ? `${row.put_iv.toFixed(1)}%` : '—';
+      document.getElementById('modal-call-iv').textContent = row.call_iv ? `${row.call_iv.toFixed(1)}%` : '—';
+      document.getElementById('modal-vol-pts').textContent = row.vol_points ? `${row.vol_points > 0 ? '+' : ''}${row.vol_points.toFixed(1)} pts` : '—';
+      document.getElementById('modal-ret-1m').textContent = row.return_1m ? `${row.return_1m >= 0 ? '+' : ''}${row.return_1m.toFixed(1)}%` : '—';
+      document.getElementById('modal-rvol').textContent = row.rvol ? `${row.rvol.toFixed(2)}x` : '—';
+      document.getElementById('modal-sec-rank').textContent = row.sector_rank_str || '—';
+
+      document.getElementById('modal-backdrop').classList.remove('hidden');
+    }
+
+    function closeModal() {
+      document.getElementById('modal-backdrop').classList.add('hidden');
+    }
+
+    // =========================================================================
+    // SANDBOX CALCULATOR: MATHEMATICAL CORE & MULTI-MARKET SOLVER
+    // =========================================================================
+    function normalCdf(x) {
+      const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741, a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+      const sign = x < 0 ? -1 : 1;
+      const z = Math.abs(x) / Math.SQRT2;
+      const t = 1.0 / (1.0 + p * z);
+      const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-z * z);
+      return 0.5 * (1.0 + sign * y);
+    }
+
+    function computeClientSideSandbox(payload) {
+      const isIdx = (payload.market === 'IDX') || payload.symbol.endsWith('.JK');
+      const rawDiff = payload.put_iv - payload.call_iv;
+      const volPts = rawDiff * 100.0;
+      const skewNorm = payload.atm_iv > 0 ? (rawDiff / payload.atm_iv) : 0.0;
+
+      let callDelta = 0.25;
+      let putDelta = -0.25;
+
+      if (!isIdx && payload.spot > 0 && payload.strike_call > 0 && payload.strike_put > 0 && payload.dte > 0) {
+        const t = Math.max(1, payload.dte) / 365.0;
+        const r = payload.rate || 0.045;
+        const sigmaC = payload.call_iv > 0 ? payload.call_iv : 0.25;
+        const d1Call = (Math.log(payload.spot / payload.strike_call) + (r + 0.5 * sigmaC * sigmaC) * t) / (sigmaC * Math.sqrt(t));
+        callDelta = normalCdf(d1Call);
+
+        const sigmaP = payload.put_iv > 0 ? payload.put_iv : 0.25;
+        const d1Put = (Math.log(payload.spot / payload.strike_put) + (r + 0.5 * sigmaP * sigmaP) * t) / (sigmaP * Math.sqrt(t));
+        putDelta = normalCdf(d1Put) - 1.0;
+      }
+
+      let quadKey = 'unclassified';
+      let quadBadge = '—';
+      let quadColor = '#64748b';
+      let quadAction = 'Ignore';
+
+      if (payload.ret_1m >= 0 && skewNorm < 0) {
+        quadKey = 'chase';
+        quadBadge = '🟠 CHASE';
+        quadColor = '#f97316';
+        quadAction = 'Crowded / Late';
+      } else if (payload.ret_1m >= 0 && skewNorm >= 0) {
+        quadKey = 'hedged_rally';
+        quadBadge = '🟡 HEDGED RALLY';
+        quadColor = '#eab308';
+        quadAction = 'Tighten Stops';
+      } else if (payload.ret_1m < 0 && skewNorm < 0) {
+        quadKey = 'contrarian_bid';
+        quadBadge = '🔵 CONTRARIAN BID';
+        quadColor = '#3b82f6';
+        quadAction = 'Watchlist';
+      } else if (payload.ret_1m < 0 && skewNorm >= 0) {
+        quadKey = 'fear';
+        quadBadge = '🔴 FEAR';
+        quadColor = '#ef4444';
+        quadAction = 'Leave Alone';
+      }
+
+      const sanityExceeded = Math.abs(skewNorm) > 1.25 || Math.abs(volPts) > 45.0;
+      const absSkew = Math.abs(skewNorm);
+      const degree = absSkew < 0.05 ? "slightly" : absSkew < 0.15 ? "clearly" : "heavily";
+      const side = skewNorm >= 0 ? (isIdx ? "downside tail vol" : "puts") : (isIdx ? "upside volatility" : "calls");
+      const sentiment = skewNorm >= 0 ? "fear" : "upside";
+      const benchName = isIdx ? "IHSG" : "SPY";
+
+      const retStr = payload.ret_1m >= 0 ? `up ${payload.ret_1m.toFixed(1)}% on the month` : `down ${Math.abs(payload.ret_1m).toFixed(1)}% on the month`;
+      const benchDiff = payload.ret_vs_bench >= 0 ? `+${payload.ret_vs_bench.toFixed(1)}%` : `${payload.ret_vs_bench.toFixed(1)}%`;
+      const rvolStr = payload.rvol >= 1.5 ? `heavy volume (${payload.rvol.toFixed(2)}x RVOL)` : payload.rvol >= 0.8 ? `normal volume (${payload.rvol.toFixed(2)}x RVOL)` : `light volume (${payload.rvol.toFixed(2)}x RVOL)`;
+
+      const sentence = isIdx
+        ? `${payload.symbol} — tape volatility reflects traders pricing ${degree} more ${side}, which is more ${sentiment} than ${payload.sector_rank_pct}% of its sector. The stock is ${retStr} (${benchDiff} vs ${benchName}), on ${rvolStr}. That puts it in ${quadBadge} — ${quadAction}.`
+        : `${payload.symbol} — traders are paying ${degree} more for ${side}, which is more ${sentiment} than ${payload.sector_rank_pct}% of its sector. The stock is ${retStr} (${benchDiff} vs ${benchName}), on ${rvolStr}. That puts it in ${quadBadge} — ${quadAction}.`;
+
+      return {
+        call_delta: callDelta,
+        put_delta: putDelta,
+        vol_points: volPts,
+        skew_normalized: skewNorm,
+        sanity_exceeded: sanityExceeded,
+        quadrant: { badge: quadBadge, color: quadColor, action: quadAction, quadrant: quadKey.toUpperCase() },
+        readout_sentence: sentence
+      };
+    }
+
+    function setSandboxMarket(m) {
+      SANDBOX_MARKET = m;
+      document.getElementById('sb-mkt-us').className = `px-3 py-1.5 rounded transition flex items-center space-x-1.5 ${m === 'US' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`;
+      document.getElementById('sb-mkt-idx').className = `px-3 py-1.5 rounded transition flex items-center space-x-1.5 ${m === 'IDX' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`;
+
+      if (m === 'IDX') {
+        document.getElementById('lbl-sb-spot').textContent = "Spot Price (Rp / IDR)";
+        document.getElementById('lbl-sb-atm-iv').textContent = "Realized Vol σ (%)";
+        document.getElementById('lbl-sb-put-iv').textContent = "Downside Vol σ_down (%)";
+        document.getElementById('lbl-sb-call-iv').textContent = "Upside Vol σ_up (%)";
+        document.getElementById('lbl-sb-bench').textContent = "vs IHSG (%)";
+        document.getElementById('lbl-res-skew').textContent = "Realized Vol Skew";
+        document.getElementById('lbl-res-m1').textContent = "Downside σ_down";
+        document.getElementById('lbl-res-m2').textContent = "Upside σ_up";
+        loadSandboxPreset('idx_bbca');
+      } else {
+        document.getElementById('lbl-sb-spot').textContent = "Spot Price ($)";
+        document.getElementById('lbl-sb-atm-iv').textContent = "ATM IV (%)";
+        document.getElementById('lbl-sb-put-iv').textContent = "25Δ Put IV (%)";
+        document.getElementById('lbl-sb-call-iv').textContent = "25Δ Call IV (%)";
+        document.getElementById('lbl-sb-bench').textContent = "vs SPY (%)";
+        document.getElementById('lbl-res-skew').textContent = "Normalized Skew";
+        document.getElementById('lbl-res-m1').textContent = "Call Delta";
+        document.getElementById('lbl-res-m2').textContent = "Put Delta";
+        loadSandboxPreset('contrarian');
+      }
+      renderSandboxPresets();
+      showToast(`Sandbox switched to ${m === 'US' ? 'US Options Regime' : 'Indonesia IDX Realized Vol Regime'}`, 'info');
+    }
+
+    function renderSandboxPresets() {
+      const container = document.getElementById('sb-presets-container');
+      if (SANDBOX_MARKET === 'IDX') {
+        container.innerHTML = `
+          <button onclick="loadSandboxPreset('idx_bbca')" class="px-3 py-1.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/60 hover:bg-emerald-900 transition">🏛️ BBCA.JK (Financials - Contrarian)</button>
+          <button onclick="loadSandboxPreset('idx_klbf')" class="px-3 py-1.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 hover:bg-blue-900 transition">🔵 KLBF.JK (Healthcare - Call Bid)</button>
+          <button onclick="loadSandboxPreset('idx_myor')" class="px-3 py-1.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 hover:bg-blue-900 transition">🔵 MYOR.JK (Staples - Call Bid)</button>
+          <button onclick="loadSandboxPreset('idx_pgas')" class="px-3 py-1.5 rounded bg-amber-950 text-amber-300 border border-amber-800/60 hover:bg-amber-900 transition">🟡 PGAS.JK (Energy - Hedged Rally)</button>
+          <button onclick="loadSandboxPreset('idx_ptba')" class="px-3 py-1.5 rounded bg-orange-950 text-orange-300 border border-orange-800/60 hover:bg-orange-900 transition">🟠 PTBA.JK (Mining - Chase)</button>
+        `;
+      } else {
+        container.innerHTML = `
+          <button onclick="loadSandboxPreset('contrarian')" class="px-3 py-1.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 hover:bg-blue-900 transition">🔵 AMZN (Stock Down, Calls Bid)</button>
+          <button onclick="loadSandboxPreset('caution')" class="px-3 py-1.5 rounded bg-amber-950 text-amber-300 border border-amber-800/60 hover:bg-amber-900 transition">🟡 AMT (Rallying with High Put Skew)</button>
+          <button onclick="loadSandboxPreset('chase')" class="px-3 py-1.5 rounded bg-orange-950 text-orange-300 border border-orange-800/60 hover:bg-orange-900 transition">🟠 TSLA (Stock Up, Calls Bid)</button>
+          <button onclick="loadSandboxPreset('trap4')" class="px-3 py-1.5 rounded bg-red-950 text-red-300 border border-red-800/60 hover:bg-red-900 transition">⚠️ DUK_BUG (Trap #4 Outlier Test)</button>
+        `;
+      }
+    }
+
+    function debouncedSandboxCalculate() {
+      clearTimeout(SANDBOX_DEBOUNCE_TIMER);
+      SANDBOX_DEBOUNCE_TIMER = setTimeout(runSandboxCalculate, 80);
+    }
+
+    async function runSandboxCalculate() {
+      const payload = {
+        spot: parseFloat(document.getElementById('sb-spot').value) || 100.0,
+        strike_call: (parseFloat(document.getElementById('sb-spot').value) || 100.0) * 1.05,
+        strike_put: (parseFloat(document.getElementById('sb-spot').value) || 100.0) * 0.95,
+        dte: parseFloat(document.getElementById('sb-dte').value) || 30.0,
+        atm_iv: (parseFloat(document.getElementById('sb-atm-iv').value) || 30.0) / 100.0,
+        call_iv: (parseFloat(document.getElementById('sb-call-iv').value) || 30.0) / 100.0,
+        put_iv: (parseFloat(document.getElementById('sb-put-iv').value) || 30.0) / 100.0,
+        rate: 0.045,
+        ret_1m: parseFloat(document.getElementById('sb-ret-1m').value) || 0.0,
+        ret_vs_bench: parseFloat(document.getElementById('sb-ret-bench').value) || 0.0,
+        rvol: parseFloat(document.getElementById('sb-rvol').value) || 1.0,
+        symbol: (document.getElementById('sb-symbol').value || "CUSTOM").toUpperCase(),
+        sector: document.getElementById('sb-sector').value || "Technology",
+        sector_rank_pct: parseInt(document.getElementById('sb-sec-rank').value) || 50,
+        market: SANDBOX_MARKET
+      };
+
+      // 1. Instant client-side computation (0ms UI feedback)
+      const localOut = computeClientSideSandbox(payload);
+      updateSandboxDOM(payload, localOut);
+
+      // 2. Server-side authoritative solver (validates BS Greeks & Config)
+      try {
+        const res = await fetch('/api/calculate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          const remoteOut = await res.json();
+          updateSandboxDOM(payload, remoteOut);
+        }
+      } catch (e) {
+        // Fallback already displayed cleanly from client computation
+      }
+    }
+
+    function updateSandboxDOM(payload, out) {
+      document.getElementById('res-sb-ticker').textContent = payload.symbol;
+      
+      const q = out.quadrant || { badge: '—', color: '#64748b' };
+      const qBadge = document.getElementById('res-sb-badge');
+      qBadge.textContent = q.badge;
+      qBadge.style.backgroundColor = `${q.color}22`;
+      qBadge.style.color = q.color;
+      qBadge.style.borderColor = `${q.color}55`;
+
+      const ceilBadge = document.getElementById('res-sb-ceiling-status');
+      if (out.sanity_exceeded) {
+        ceilBadge.textContent = "TRAP #4: CEILING EXCEEDED ⚠️";
+        ceilBadge.className = "px-2 py-0.5 rounded text-[10px] font-mono bg-red-950 text-red-300 border border-red-800";
+      } else {
+        ceilBadge.textContent = "TRAP #4: PASS";
+        ceilBadge.className = "px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800";
+      }
+
+      document.getElementById('res-sb-skew').textContent = `${out.skew_normalized > 0 ? '+' : ''}${out.skew_normalized.toFixed(4)}`;
+      document.getElementById('res-sb-volpts').textContent = `${out.vol_points > 0 ? '+' : ''}${out.vol_points.toFixed(1)} pts`;
+      
+      if (SANDBOX_MARKET === 'IDX') {
+        document.getElementById('res-sb-calldelta').textContent = `${(payload.put_iv * 100).toFixed(1)}%`;
+        document.getElementById('res-sb-putdelta').textContent = `${(payload.call_iv * 100).toFixed(1)}%`;
+      } else {
+        document.getElementById('res-sb-calldelta').textContent = out.call_delta !== undefined ? out.call_delta.toFixed(2) : '—';
+        document.getElementById('res-sb-putdelta').textContent = out.put_delta !== undefined ? out.put_delta.toFixed(2) : '—';
+      }
+      
+      document.getElementById('res-sb-sentence').textContent = out.readout_sentence || 'Sentence calculating...';
+    }
+
+    function loadSandboxPreset(preset) {
+      if (preset === 'contrarian') {
+        document.getElementById('sb-symbol').value = "AMZN";
+        document.getElementById('sb-sector').value = "Consumer Discretionary";
+        document.getElementById('sb-spot').value = "175.0";
+        document.getElementById('sb-atm-iv').value = "28.0";
+        document.getElementById('sb-put-iv').value = "26.5";
+        document.getElementById('sb-call-iv').value = "30.0";
+        document.getElementById('sb-ret-1m').value = "-4.5";
+        document.getElementById('sb-ret-bench').value = "-3.2";
+        document.getElementById('sb-rvol').value = "0.75";
+        document.getElementById('sb-sec-rank').value = "10";
+      } else if (preset === 'caution') {
+        document.getElementById('sb-symbol').value = "AMT";
+        document.getElementById('sb-sector').value = "Real Estate";
+        document.getElementById('sb-spot').value = "220.0";
+        document.getElementById('sb-atm-iv').value = "22.0";
+        document.getElementById('sb-put-iv').value = "25.0";
+        document.getElementById('sb-call-iv').value = "21.5";
+        document.getElementById('sb-ret-1m').value = "+6.2";
+        document.getElementById('sb-ret-bench').value = "+5.0";
+        document.getElementById('sb-rvol').value = "1.30";
+        document.getElementById('sb-sec-rank').value = "85";
+      } else if (preset === 'chase') {
+        document.getElementById('sb-symbol').value = "TSLA";
+        document.getElementById('sb-sector').value = "Consumer Discretionary";
+        document.getElementById('sb-spot').value = "240.0";
+        document.getElementById('sb-atm-iv').value = "45.0";
+        document.getElementById('sb-put-iv').value = "43.0";
+        document.getElementById('sb-call-iv').value = "47.5";
+        document.getElementById('sb-ret-1m').value = "+14.0";
+        document.getElementById('sb-ret-bench').value = "+12.5";
+        document.getElementById('sb-rvol').value = "1.80";
+        document.getElementById('sb-sec-rank').value = "20";
+      } else if (preset === 'trap4') {
+        document.getElementById('sb-symbol').value = "DUK_BUG";
+        document.getElementById('sb-sector').value = "Utilities";
+        document.getElementById('sb-spot').value = "100.0";
+        document.getElementById('sb-atm-iv').value = "14.0";
+        document.getElementById('sb-put-iv').value = "10.0";
+        document.getElementById('sb-call-iv').value = "35.0"; // Quote artifact
+        document.getElementById('sb-ret-1m').value = "+2.0";
+        document.getElementById('sb-ret-bench').value = "+1.0";
+        document.getElementById('sb-rvol').value = "1.0";
+        document.getElementById('sb-sec-rank').value = "0";
+      } else if (preset === 'idx_bbca') {
+        document.getElementById('sb-symbol').value = "BBCA.JK";
+        document.getElementById('sb-sector').value = "Financials";
+        document.getElementById('sb-spot').value = "10250";
+        document.getElementById('sb-atm-iv').value = "24.0";
+        document.getElementById('sb-put-iv').value = "22.5";
+        document.getElementById('sb-call-iv').value = "25.5";
+        document.getElementById('sb-ret-1m').value = "-1.5";
+        document.getElementById('sb-ret-bench').value = "+0.5";
+        document.getElementById('sb-rvol').value = "1.15";
+        document.getElementById('sb-sec-rank').value = "25";
+      } else if (preset === 'idx_klbf') {
+        document.getElementById('sb-symbol').value = "KLBF.JK";
+        document.getElementById('sb-sector').value = "Healthcare";
+        document.getElementById('sb-spot').value = "1480";
+        document.getElementById('sb-atm-iv').value = "32.5";
+        document.getElementById('sb-put-iv').value = "18.0";
+        document.getElementById('sb-call-iv').value = "36.5";
+        document.getElementById('sb-ret-1m').value = "-5.6";
+        document.getElementById('sb-ret-bench').value = "-9.1";
+        document.getElementById('sb-rvol').value = "1.02";
+        document.getElementById('sb-sec-rank').value = "15";
+      } else if (preset === 'idx_myor') {
+        document.getElementById('sb-symbol').value = "MYOR.JK";
+        document.getElementById('sb-sector').value = "Consumer Staples";
+        document.getElementById('sb-spot').value = "2640";
+        document.getElementById('sb-atm-iv').value = "28.0";
+        document.getElementById('sb-put-iv').value = "20.0";
+        document.getElementById('sb-call-iv').value = "31.5";
+        document.getElementById('sb-ret-1m').value = "-8.9";
+        document.getElementById('sb-ret-bench').value = "-12.4";
+        document.getElementById('sb-rvol').value = "1.12";
+        document.getElementById('sb-sec-rank').value = "10";
+      } else if (preset === 'idx_pgas') {
+        document.getElementById('sb-symbol').value = "PGAS.JK";
+        document.getElementById('sb-sector').value = "Energy";
+        document.getElementById('sb-spot').value = "1520";
+        document.getElementById('sb-atm-iv').value = "31.0";
+        document.getElementById('sb-put-iv').value = "33.5";
+        document.getElementById('sb-call-iv').value = "29.2";
+        document.getElementById('sb-ret-1m').value = "+1.7";
+        document.getElementById('sb-ret-bench').value = "-1.8";
+        document.getElementById('sb-rvol').value = "1.32";
+        document.getElementById('sb-sec-rank').value = "75";
+      } else if (preset === 'idx_ptba') {
+        document.getElementById('sb-symbol').value = "PTBA.JK";
+        document.getElementById('sb-sector').value = "Basic Materials";
+        document.getElementById('sb-spot').value = "2780";
+        document.getElementById('sb-atm-iv').value = "38.0";
+        document.getElementById('sb-put-iv').value = "31.0";
+        document.getElementById('sb-call-iv').value = "45.3";
+        document.getElementById('sb-ret-1m').value = "+31.9";
+        document.getElementById('sb-ret-bench').value = "+28.4";
+        document.getElementById('sb-rvol').value = "1.99";
+        document.getElementById('sb-sec-rank').value = "8";
+      }
+      runSandboxCalculate();
+      showToast(`Loaded preset: ${preset.toUpperCase()}`, 'info');
+    }
+
+    // ======================== TUNER SETTINGS LOGIC ========================
+    async function fetchRuntimeConfig() {
+      try {
+        const res = await fetch('/api/config');
+        const cfg = await res.json();
+        
+        document.getElementById('cfg-delta').value = cfg.target_delta;
+        document.getElementById('val-cfg-delta').textContent = `${cfg.target_delta} (${Math.round(cfg.target_delta*100)}Δ)`;
+
+        document.getElementById('cfg-agreement').value = cfg.sector_agreement_threshold;
+        document.getElementById('val-cfg-agreement').textContent = `${Math.round(cfg.sector_agreement_threshold*100)}%`;
+
+        document.getElementById('cfg-ceiling').value = cfg.max_abs_normalized_skew;
+        document.getElementById('val-cfg-ceiling').textContent = cfg.max_abs_normalized_skew;
+
+        document.getElementById('cfg-min-dte').value = cfg.min_dte;
+        document.getElementById('cfg-max-dte').value = cfg.max_dte;
+      } catch (e) {
+        console.error("Error fetching config:", e);
+      }
+    }
+
+    async function saveConfigSettings() {
+      const payload = {
+        target_delta: parseFloat(document.getElementById('cfg-delta').value),
+        sector_agreement_threshold: parseFloat(document.getElementById('cfg-agreement').value),
+        max_abs_normalized_skew: parseFloat(document.getElementById('cfg-ceiling').value),
+        min_dte: parseInt(document.getElementById('cfg-min-dte').value),
+        max_dte: parseInt(document.getElementById('cfg-max-dte').value)
+      };
+
+      try {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const out = await res.json();
+        showToast("Configuration parameters updated! Re-run scans to apply updated thresholds.", "success");
+      } catch (e) {
+        showToast("Failed to update config: " + e, "error");
+      }
+    }
+  </script>
+</body>
+</html>
