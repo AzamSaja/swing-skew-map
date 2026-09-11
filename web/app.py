@@ -60,6 +60,9 @@ def get_or_load_data(market: str = "US"):
     return None
 
 @app.get("/", response_class=HTMLResponse)
+@app.get("/api", response_class=HTMLResponse)
+@app.get("/api/index", response_class=HTMLResponse)
+@app.get("/api/index.py", response_class=HTMLResponse)
 def index_page():
     index_file = TEMPLATES_DIR / "index.html"
     if not index_file.exists():
