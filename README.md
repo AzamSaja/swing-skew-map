@@ -2,6 +2,10 @@
 
 A production-grade **Options Skew Map** system built strictly according to the methodology, mathematical formulas, and trap protections in [Bert Trading's Guide: *Build Your Own Skew Map — How to See What Options Traders Are Actually Paying For*](https://yellow-cardinal-454.notion.site/Build-Your-Own-Skew-Map-How-to-See-What-Options-Traders-Are-Actually-Paying-For-and-the-Weekend-V-3c0a77cc65b681678b2cd9b3499eaa61#3fb0e7b0b1634c23993118f2ef37c1a7).
 
+
+> 🚀 **Live Production Deployment**: [https://swing-skew-map.vercel.app](https://swing-skew-map.vercel.app)  
+> 📦 **GitHub Repository**: [https://github.com/AzamSaja/swing-skew-map](https://github.com/AzamSaja/swing-skew-map)
+
 ---
 
 ## What Skew Is
@@ -101,6 +105,6 @@ Run the full unit and integration test suite:
 ```bash
 python -m unittest discover -s tests -p "test_*.py"
 ```
-Ran 17 tests in 0.073s: OK
+Ran 19 tests in 0.084s: OK
 
 
