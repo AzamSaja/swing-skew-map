@@ -31,7 +31,8 @@ try:
 except OSError:
     pass
 
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Multi-market cache for instant dashboard responsiveness
 CACHE = {
