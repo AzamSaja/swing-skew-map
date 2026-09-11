@@ -1,5 +1,5 @@
 import sys
-import json
+import urllib.parse
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -14,39 +14,22 @@ class VercelPathRewriter:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
-            headers = dict(scope.get("headers", []))
-            if b"check_headers" in scope.get("query_string", b""):
-                raw_headers = {k.decode("latin1"): v.decode("latin1") for k, v in headers.items()}
-                body = json.dumps({"headers": raw_headers, "scope_path": scope.get("path")}).encode("utf-8")
-                await send({
-                    "type": "http.response.start",
-                    "status": 200,
-                    "headers": [[b"content-type", b"application/json"]]
-                })
-                await send({
-                    "type": "http.response.body",
-                    "body": body
-                })
-                return
-            
-            for h in [b"x-matched-path", b"x-vercel-matched-path", b"x-forwarded-uri", b"x-original-uri"]:
-                if h in headers:
-                    val = headers[h].decode("latin1")
-                    if val:
-                        if "?" in val:
-                            path_part, qs_part = val.split("?", 1)
-                            scope["path"] = path_part
-                            scope["raw_path"] = path_part.encode("latin1")
-                            if not scope.get("query_string"):
-                                scope["query_string"] = qs_part.encode("latin1")
-                        else:
-                            scope["path"] = val
-                            scope["raw_path"] = val.encode("latin1")
-                        break
-            else:
-                if scope.get("path") in ["/api/index.py", "/api/index", "/api"]:
-                    scope["path"] = "/"
-                    scope["raw_path"] = b"/"
+            raw_qs = scope.get("query_string", b"").decode("latin1")
+            if "__path" in raw_qs:
+                params = urllib.parse.parse_qsl(raw_qs, keep_blank_values=True)
+                path_val = "/"
+                filtered_params = []
+                for k, v in params:
+                    if k == "__path":
+                        path_val = v if v.startswith("/") else f"/{v}"
+                    else:
+                        filtered_params.append((k, v))
+                scope["path"] = path_val
+                scope["raw_path"] = path_val.encode("latin1")
+                scope["query_string"] = urllib.parse.urlencode(filtered_params).encode("latin1")
+            elif scope.get("path") in ["/api/index.py", "/api/index", "/api"]:
+                scope["path"] = "/"
+                scope["raw_path"] = b"/"
         await self.app(scope, receive, send)
 
 app = VercelPathRewriter(fastapi_app)
