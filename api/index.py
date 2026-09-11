@@ -1,4 +1,5 @@
 import sys
+import json
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -14,6 +15,20 @@ class VercelPathRewriter:
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
             headers = dict(scope.get("headers", []))
+            if b"check_headers" in scope.get("query_string", b""):
+                raw_headers = {k.decode("latin1"): v.decode("latin1") for k, v in headers.items()}
+                body = json.dumps({"headers": raw_headers, "scope_path": scope.get("path")}).encode("utf-8")
+                await send({
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [[b"content-type", b"application/json"]]
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": body
+                })
+                return
+            
             for h in [b"x-matched-path", b"x-vercel-matched-path", b"x-forwarded-uri", b"x-original-uri"]:
                 if h in headers:
                     val = headers[h].decode("latin1")
